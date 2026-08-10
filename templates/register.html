@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crear cuenta — Estudio de Voz</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="wrap auth-wrap">
+  <header>
+    <h1>Estudio de Voz</h1>
+    <div class="tag">crear cuenta gratis</div>
+  </header>
+
+  <section class="panel">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="message {{ 'error' if category == 'error' else 'info' }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <form method="POST">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required autofocus>
+      <label for="password">Contraseña (mínimo 8 caracteres)</label>
+      <input type="password" id="password" name="password" required minlength="8">
+      <button class="btn" type="submit">Crear cuenta</button>
+    </form>
+
+    {% if google_enabled %}
+      <div class="divider"><span>o</span></div>
+      <a class="btn google" href="{{ url_for('auth.google_login') }}" style="display:block; text-align:center; text-decoration:none;">
+        Continuar con Google
+      </a>
+    {% endif %}
+  </section>
+
+  <div class="auth-switch">
+    ¿Ya tenés cuenta? <a href="{{ url_for('auth.login') }}">Iniciá sesión</a>
+  </div>
+</div>
+</body>
+</html>

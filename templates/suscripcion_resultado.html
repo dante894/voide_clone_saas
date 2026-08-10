@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Suscripción — Estudio de Voz</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="wrap auth-wrap">
+  <header>
+    <h1>Estudio de Voz</h1>
+    <div class="tag">suscripción</div>
+  </header>
+  <section class="panel">
+    <p>Gracias. Estamos confirmando tu suscripción con Mercado Pago — puede tardar unos segundos
+    en reflejarse acá (lo activamos automáticamente en cuanto Mercado Pago nos confirma el pago).</p>
+    <a class="btn" href="{{ url_for('cuenta') }}" style="display:block; text-align:center; text-decoration:none; margin-top:12px;">Ver mi cuenta</a>
+  </section>
+</div>
+</body>
+</html>

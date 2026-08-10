@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planes — Estudio de Voz</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="wrap">
+  <div class="topnav">
+    <a href="{{ url_for('index') }}" style="color: var(--text); font-family: var(--serif);">← Estudio de Voz</a>
+    <div>
+      {% if current_user.is_authenticated %}
+        <a href="{{ url_for('cuenta') }}">Mi cuenta</a>
+        {% if current_user.is_admin %}<a href="{{ url_for('admin.dashboard') }}">Admin</a>{% endif %}
+        <a href="{{ url_for('auth.logout') }}">Salir</a>
+      {% else %}
+        <a href="{{ url_for('auth.login') }}">Iniciar sesión</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <header>
+    <h1>Planes</h1>
+    <div class="tag">elegí cómo usar Estudio de Voz</div>
+  </header>
+
+  <div id="msg"></div>
+
+  <div class="plans-grid">
+    <div class="plan-card">
+      <h2>Free</h2>
+      <div class="plan-price">$0</div>
+      <ul>
+        <li>Hasta {{ limits.free.max_chars }} caracteres por audio</li>
+        <li>{{ limits.free.max_voices }} voz de referencia guardada</li>
+        <li>{{ limits.free.max_generations_per_day }} audios por día</li>
+      </ul>
+      {% if current_user.is_authenticated and not current_user.is_pro %}
+        <button class="btn secondary" disabled>Tu plan actual</button>
+      {% endif %}
+    </div>
+
+    <div class="plan-card pro">
+      <h2>Pro</h2>
+      <div class="plan-price">${{ price }} ARS / mes</div>
+      <ul>
+        <li>Hasta {{ limits.pro.max_chars }} caracteres por audio</li>
+        <li>Hasta {{ limits.pro.max_voices }} voces de referencia guardadas</li>
+        <li>{{ limits.pro.max_generations_per_day }} audios por día</li>
+      </ul>
+      {% if current_user.is_authenticated and current_user.is_pro %}
+        <button class="btn secondary" disabled>Tu plan actual</button>
+        <button class="btn" id="cancelBtn" style="margin-top:8px; background: var(--danger);">Cancelar suscripción</button>
+      {% elif current_user.is_authenticated %}
+        <button class="btn" id="subscribeBtn">Pasarme a Pro con Mercado Pago</button>
+      {% else %}
+        <a class="btn" href="{{ url_for('auth.register') }}" style="display:block; text-align:center; text-decoration:none;">Creá tu cuenta primero</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<script>
+function showMsg(text, type) {
+  document.getElementById("msg").innerHTML = `<div class="message ${type}">${text}</div>`;
+}
+
+const subscribeBtn = document.getElementById("subscribeBtn");
+if (subscribeBtn) {
+  subscribeBtn.addEventListener("click", async () => {
+    subscribeBtn.disabled = true;
+    subscribeBtn.textContent = "Redirigiendo a Mercado Pago...";
+    try {
+      const res = await fetch("{{ url_for('billing.suscribirse') }}", { method: "POST" });
+      const data = await res.json();
+      if (data.init_point) {
+        window.location.href = data.init_point;
+      } else {
+        showMsg(data.error || "No se pudo iniciar la suscripción.", "error");
+        subscribeBtn.disabled = false;
+        subscribeBtn.textContent = "Pasarme a Pro con Mercado Pago";
+      }
+    } catch (err) {
+      showMsg("Error de conexión: " + err.message, "error");
+      subscribeBtn.disabled = false;
+      subscribeBtn.textContent = "Pasarme a Pro con Mercado Pago";
+    }
+  });
+}
+
+const cancelBtn = document.getElementById("cancelBtn");
+if (cancelBtn) {
+  cancelBtn.addEventListener("click", async () => {
+    if (!confirm("¿Seguro que querés cancelar tu suscripción Pro?")) return;
+    cancelBtn.disabled = true;
+    try {
+      const res = await fetch("{{ url_for('billing.cancelar_suscripcion') }}", { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        showMsg("Suscripción cancelada. Volviste al plan Free.", "info");
+        setTimeout(() => location.reload(), 1500);
+      } else {
+        showMsg(data.error || "No se pudo cancelar.", "error");
+        cancelBtn.disabled = false;
+      }
+    } catch (err) {
+      showMsg("Error de conexión: " + err.message, "error");
+      cancelBtn.disabled = false;
+    }
+  });
+}
+</script>
+</body>
+</html>

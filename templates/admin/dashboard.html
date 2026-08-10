@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — Estudio de Voz</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="wrap" style="max-width: 920px;">
+  <div class="topnav">
+    <a href="{{ url_for('index') }}" style="color: var(--text); font-family: var(--serif);">← Estudio de Voz</a>
+    <div>
+      <a href="{{ url_for('cuenta') }}">Mi cuenta</a>
+      <a href="{{ url_for('auth.logout') }}">Salir</a>
+    </div>
+  </div>
+
+  <header>
+    <h1>Admin</h1>
+    <div class="tag">estadísticas de usuarios y visitas — últimos {{ days_window }} días</div>
+  </header>
+
+  <div class="admin-grid">
+    <div class="stat-card">
+      <div class="num">{{ total_users }}</div>
+      <div class="label">usuarios totales</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">{{ pro_users }}</div>
+      <div class="label">suscripciones Pro activas</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">{{ google_users }} / {{ password_users }}</div>
+      <div class="label">Google / email·contraseña</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">{{ total_pageviews_window }}</div>
+      <div class="label">visitas ({{ days_window }} días)</div>
+    </div>
+  </div>
+
+  <div class="admin-section">
+    <h3>Registros por día</h3>
+    <div class="bar-chart">
+      {% for row in signups_series %}
+        <div class="bar-col">
+          <div class="bar" style="height: {{ (row.count / signups_max * 100) | round(0, 'floor') }}%;" title="{{ row.day }}: {{ row.count }}"></div>
+          <div class="bar-label">{{ row.day[5:] }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="admin-section">
+    <h3>Logins por día — Google vs email/contraseña</h3>
+    <div class="legend">
+      <span><span class="dot accent"></span>Google</span>
+      <span><span class="dot teal"></span>Email/contraseña</span>
+    </div>
+    <div class="bar-chart">
+      {% for row in logins_google_series %}
+        <div class="bar-col" style="flex-direction: row; align-items: flex-end; gap: 2px;">
+          <div class="bar" style="height: {{ (row.count / logins_max * 100) | round(0, 'floor') }}%;" title="Google {{ row.day }}: {{ row.count }}"></div>
+          <div class="bar secondary" style="height: {{ (logins_password_series[loop.index0].count / logins_max * 100) | round(0, 'floor') }}%;" title="Email {{ row.day }}: {{ logins_password_series[loop.index0].count }}"></div>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="bar-chart" style="height:auto; margin-top:2px;">
+      {% for row in logins_google_series %}
+        <div class="bar-col"><div class="bar-label">{{ row.day[5:] }}</div></div>
+      {% endfor %}
+    </div>
+    <p class="panel-sub" style="margin-top:10px;">Total de logins en la ventana: {{ total_logins_window }}</p>
+  </div>
+
+  <div class="admin-section">
+    <h3>Visitas por día</h3>
+    <div class="bar-chart">
+      {% for row in pageviews_series %}
+        <div class="bar-col">
+          <div class="bar secondary" style="height: {{ (row.count / pageviews_max * 100) | round(0, 'floor') }}%;" title="{{ row.day }}: {{ row.count }}"></div>
+          <div class="bar-label">{{ row.day[5:] }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="admin-section">
+    <h3>Páginas más visitadas ({{ days_window }} días)</h3>
+    <table class="admin-table">
+      <thead><tr><th>Página</th><th>Visitas</th></tr></thead>
+      <tbody>
+        {% for path, n in top_paths %}
+          <tr><td class="mono">{{ path }}</td><td>{{ n }}</td></tr>
+        {% else %}
+          <tr><td colspan="2">Todavía no hay visitas registradas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="admin-section">
+    <h3>Últimos registros</h3>
+    <table class="admin-table">
+      <thead><tr><th>Email</th><th>Plan</th><th>Método</th><th>Fecha</th></tr></thead>
+      <tbody>
+        {% for u in recent_signups %}
+          <tr>
+            <td class="mono">{{ u.email }}</td>
+            <td>{{ 'PRO' if u.is_pro else 'FREE' }}</td>
+            <td>{{ 'Google' if u.oauth_provider == 'google' else 'Email' }}</td>
+            <td class="mono">{{ u.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4">Todavía no hay usuarios.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="admin-section">
+    <h3>Últimos logins</h3>
+    <table class="admin-table">
+      <thead><tr><th>Email</th><th>Método</th><th>Fecha</th></tr></thead>
+      <tbody>
+        {% for ev in recent_logins %}
+          <tr>
+            <td class="mono">{{ ev.user.email }}</td>
+            <td>{{ 'Google' if ev.provider == 'google' else 'Email' }}</td>
+            <td class="mono">{{ ev.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="3">Todavía no hay logins registrados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+</body>
+</html>

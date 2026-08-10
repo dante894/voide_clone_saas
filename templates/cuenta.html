@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mi cuenta — Estudio de Voz</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="wrap">
+  <div class="topnav">
+    <a href="{{ url_for('index') }}" style="color: var(--text); font-family: var(--serif);">← Estudio de Voz</a>
+    <div><a href="{{ url_for('auth.logout') }}">Salir</a></div>
+  </div>
+
+  <header>
+    <h1>Mi cuenta</h1>
+    <div class="tag">{{ user.email }}</div>
+  </header>
+
+  <section class="panel">
+    <p>
+      Plan actual:
+      <span class="badge {{ 'pro' if user.is_pro else '' }}">{{ 'PRO' if user.is_pro else 'FREE' }}</span>
+    </p>
+    {% if not user.is_pro %}
+      <a class="btn" href="{{ url_for('billing.planes') }}" style="display:inline-block; text-decoration:none;">Pasarme a Pro</a>
+    {% else %}
+      <p class="panel-sub">Tu suscripción se renueva automáticamente todos los meses vía Mercado Pago.</p>
+      <a class="btn secondary" href="{{ url_for('billing.planes') }}" style="display:inline-block; text-decoration:none;">Administrar suscripción</a>
+    {% endif %}
+  </section>
+</div>
+</body>
+</html>

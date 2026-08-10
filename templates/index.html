@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Estudio de Voz</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="wrap">
+  <div class="topnav">
+    <span class="badge {{ 'pro' if current_user.is_pro else '' }}">{{ 'PRO' if current_user.is_pro else 'FREE' }}</span>
+    <div>
+      {% if not current_user.is_pro %}<a href="{{ url_for('billing.planes') }}">Pasarme a Pro</a>{% endif %}
+      {% if current_user.is_admin %}<a href="{{ url_for('admin.dashboard') }}">Admin</a>{% endif %}
+      <a href="{{ url_for('cuenta') }}">Mi cuenta</a>
+      <a href="{{ url_for('auth.logout') }}">Salir</a>
+    </div>
+  </div>
+  <header>
+    <h1>Estudio de Voz</h1>
+    <div class="tag">texto → audio · clonación de voz</div>
+  </header>
+
+  <!-- PASO 1: VOCES -->
+  <section class="panel">
+    <div class="panel-head">
+      <span class="step">01</span>
+      <h2>Voces de referencia</h2>
+    </div>
+    <p class="panel-sub">Elige la voz que se usará para leer el texto. Puedes grabar una muestra o subir un archivo de audio.</p>
+
+    <div id="voiceGrid" class="voice-grid"></div>
+    <div id="voiceEmpty" class="empty-note" style="display:none;">
+      Todavía no hay voces guardadas. Añade una abajo.
+    </div>
+
+    <div class="add-voice">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="record">Grabar</button>
+        <button class="tab-btn" data-tab="upload">Subir archivo</button>
+      </div>
+
+      <div class="tab-content active" id="tab-record">
+        <p class="panel-sub" style="margin-top:0;">Graba al menos 10–15 segundos de audio limpio, sin ruido de fondo, de la persona cuya voz quieres usar (con su permiso).</p>
+        <button class="btn record" id="recordBtn">● Grabar</button>
+        <div class="rec-status" id="recStatus"></div>
+        <audio id="recPreview" controls style="display:none; width:100%; margin-top:8px;"></audio>
+        <div id="recSaveRow" style="display:none; margin-top:12px;">
+          <label for="recName">Nombre de la voz</label>
+          <input type="text" id="recName" placeholder="Ej: Mamá, Narrador, Juan...">
+          <button class="btn" id="recSaveBtn">Guardar voz</button>
+        </div>
+      </div>
+
+      <div class="tab-content" id="tab-upload">
+        <p class="panel-sub" style="margin-top:0;">Sube un archivo .wav (idealmente) con una muestra de voz de 10 segundos o más, de un solo hablante.</p>
+        <label for="uploadFile">Archivo de audio</label>
+        <input type="file" id="uploadFile" accept="audio/*" style="margin-bottom:14px;">
+        <label for="uploadName">Nombre de la voz</label>
+        <input type="text" id="uploadName" placeholder="Ej: Mamá, Narrador, Juan...">
+        <button class="btn" id="uploadSaveBtn">Guardar voz</button>
+      </div>
+
+      <div id="voiceMsg"></div>
+    </div>
+  </section>
+
+  <!-- PASO 2: GUION -->
+  <section class="panel">
+    <div class="panel-head">
+      <span class="step">02</span>
+      <h2>Guion</h2>
+    </div>
+    <p class="panel-sub">Escribe el texto que quieres convertir a audio.</p>
+
+    <textarea id="textInput" placeholder="Escribe aquí el texto que quieres escuchar..." maxlength="{{ limits.max_chars }}"></textarea>
+    <div class="char-counter" id="charCounter">0 / {{ limits.max_chars }}</div>
+    <p class="panel-sub" style="margin-top:4px;">Te quedan {{ limits.max_generations_per_day - generations_today }} audios hoy según tu plan actual.</p>
+
+    <div class="row">
+      <div>
+        <label for="langSelect">Idioma</label>
+        <select id="langSelect">
+          {% for code, label in languages.items() %}
+          <option value="{{ code }}" {% if code == 'es' %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <button class="btn" id="generateBtn">Generar audio</button>
+
+    <div class="meter" id="meter">
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+    </div>
+    <div class="meter-label" id="meterLabel"></div>
+  </section>
+
+  <!-- PASO 3: RESULTADO -->
+  <section class="panel result">
+    <div class="panel-head">
+      <span class="step">03</span>
+      <h2>Resultado</h2>
+    </div>
+    <p class="panel-sub" id="resultEmpty">Aquí aparecerá el audio generado.</p>
+    <div id="resultBox" style="display:none;">
+      <audio id="resultAudio" controls></audio>
+      <br>
+      <a id="downloadLink" class="download-link" download>Descargar archivo .wav</a>
+    </div>
+  </section>
+
+  <footer>
+    Estudio de Voz · usá solo voces con permiso de la persona
+  </footer>
+</div>
+
+<script>
+let selectedVoice = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordedWavBlob = null;
+let recordStartTime = null;
+let recordTimerInterval = null;
+
+// ---------- Voces ----------
+
+async function loadVoices() {
+  const res = await fetch("/api/voices");
+  const voices = await res.json(); // [{filename, name, id}, ...]
+  const grid = document.getElementById("voiceGrid");
+  const empty = document.getElementById("voiceEmpty");
+  grid.innerHTML = "";
+
+  if (voices.length === 0) {
+    empty.style.display = "block";
+    selectedVoice = null;
+    return;
+  }
+  empty.style.display = "none";
+
+  if (selectedVoice && !voices.some(v => v.filename === selectedVoice)) {
+    selectedVoice = null;
+  }
+  if (!selectedVoice) {
+    selectedVoice = voices[0].filename;
+  }
+
+  voices.forEach((v) => {
+    const card = document.createElement("div");
+    card.className = "voice-card" + (v.filename === selectedVoice ? " selected" : "");
+    card.dataset.filename = v.filename;
+
+    const label = document.createElement("div");
+    label.className = "name";
+    label.textContent = v.name;
+
+    const hint = document.createElement("div");
+    hint.className = "play-hint";
+    hint.textContent = v.filename === selectedVoice ? "seleccionada" : "elegir";
+
+    const remove = document.createElement("button");
+    remove.className = "remove";
+    remove.title = "Eliminar voz";
+    remove.textContent = "✕";
+    remove.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm(`¿Eliminar la voz "${v.name}"?`)) return;
+      await fetch(`/api/voices/${v.id}`, { method: "DELETE" });
+      loadVoices();
+    });
+
+    card.appendChild(label);
+    card.appendChild(hint);
+    card.appendChild(remove);
+
+    card.addEventListener("click", () => {
+      selectedVoice = v.filename;
+      loadVoices();
+    });
+
+    grid.appendChild(card);
+  });
+}
+
+function showVoiceMsg(text, type) {
+  const el = document.getElementById("voiceMsg");
+  el.innerHTML = `<div class="message ${type}">${text}</div>`;
+  setTimeout(() => { el.innerHTML = ""; }, 5000);
+}
+
+// ---------- Pestañas Grabar / Subir ----------
+
+document.querySelectorAll(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+  });
+});
+
+// ---------- Grabación ----------
+
+document.getElementById("recordBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("recordBtn");
+  const status = document.getElementById("recStatus");
+
+  if (!mediaRecorder || mediaRecorder.state === "inactive") {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordedChunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = (e) => recordedChunks.push(e.data);
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        clearInterval(recordTimerInterval);
+        status.textContent = "Procesando audio...";
+        status.classList.remove("live");
+
+        const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
+        try {
+          recordedWavBlob = await blobToWav(blob);
+          const url = URL.createObjectURL(recordedWavBlob);
+          const preview = document.getElementById("recPreview");
+          preview.src = url;
+          preview.style.display = "block";
+          document.getElementById("recSaveRow").style.display = "block";
+          status.textContent = "Lista. Escúchala y guárdala con un nombre.";
+        } catch (err) {
+          status.textContent = "No se pudo procesar la grabación: " + err.message;
+        }
+      };
+
+      mediaRecorder.start();
+      recordStartTime = Date.now();
+      status.classList.add("live");
+      status.textContent = "Grabando 0:00";
+      recordTimerInterval = setInterval(() => {
+        const secs = Math.floor((Date.now() - recordStartTime) / 1000);
+        const m = Math.floor(secs / 60);
+        const s = String(secs % 60).padStart(2, "0");
+        status.textContent = `Grabando ${m}:${s}`;
+      }, 250);
+
+      btn.textContent = "■ Detener";
+      btn.classList.add("recording");
+    } catch (err) {
+      status.textContent = "No se pudo acceder al micrófono: " + err.message;
+    }
+  } else {
+    mediaRecorder.stop();
+    btn.textContent = "● Grabar";
+    btn.classList.remove("recording");
+  }
+});
+
+document.getElementById("recSaveBtn").addEventListener("click", async () => {
+  if (!recordedWavBlob) return;
+  const name = document.getElementById("recName").value.trim();
+  if (!name) {
+    showVoiceMsg("Escribe un nombre para esta voz.", "error");
+    return;
+  }
+  const formData = new FormData();
+  formData.append("file", recordedWavBlob, "grabacion.wav");
+  formData.append("name", name);
+
+  const res = await fetch("/api/upload-voice", { method: "POST", body: formData });
+  const data = await res.json();
+  if (data.ok) {
+    showVoiceMsg("Voz guardada correctamente.", "info");
+    document.getElementById("recName").value = "";
+    document.getElementById("recPreview").style.display = "none";
+    document.getElementById("recSaveRow").style.display = "none";
+    document.getElementById("recStatus").textContent = "";
+    recordedWavBlob = null;
+    selectedVoice = data.filename;
+    loadVoices();
+  } else {
+    showVoiceMsg(data.error || "No se pudo guardar la voz.", "error");
+  }
+});
+
+// ---------- Subida de archivo ----------
+
+document.getElementById("uploadSaveBtn").addEventListener("click", async () => {
+  const fileInput = document.getElementById("uploadFile");
+  const name = document.getElementById("uploadName").value.trim();
+  if (!fileInput.files[0]) {
+    showVoiceMsg("Selecciona un archivo de audio.", "error");
+    return;
+  }
+  if (!name) {
+    showVoiceMsg("Escribe un nombre para esta voz.", "error");
+    return;
+  }
+  const formData = new FormData();
+  formData.append("file", fileInput.files[0]);
+  formData.append("name", name);
+
+  const res = await fetch("/api/upload-voice", { method: "POST", body: formData });
+  const data = await res.json();
+  if (data.ok) {
+    showVoiceMsg("Voz guardada correctamente.", "info");
+    fileInput.value = "";
+    document.getElementById("uploadName").value = "";
+    selectedVoice = data.filename;
+    loadVoices();
+  } else {
+    showVoiceMsg(data.error || "No se pudo guardar la voz.", "error");
+  }
+});
+
+// ---------- Conversión a WAV ----------
+
+async function blobToWav(blob) {
+  const arrayBuffer = await blob.arrayBuffer();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const audioCtx = new AudioCtx();
+  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  const wav = encodeWav(audioBuffer);
+  audioCtx.close();
+  return wav;
+}
+
+function encodeWav(audioBuffer) {
+  const numChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const numFrames = audioBuffer.length;
+
+  // Mezclar a mono
+  const mono = new Float32Array(numFrames);
+  for (let ch = 0; ch < numChannels; ch++) {
+    const data = audioBuffer.getChannelData(ch);
+    for (let i = 0; i < numFrames; i++) {
+      mono[i] += data[i] / numChannels;
+    }
+  }
+
+  const bytesPerSample = 2;
+  const byteRate = sampleRate * bytesPerSample;
+  const dataSize = numFrames * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  writeStr(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(view, 8, "WAVE");
+  writeStr(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeStr(view, 36, "data");
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < numFrames; i++) {
+    let s = Math.max(-1, Math.min(1, mono[i]));
+    s = s < 0 ? s * 0x8000 : s * 0x7fff;
+    view.setInt16(offset, s, true);
+    offset += 2;
+  }
+
+  return new Blob([view], { type: "audio/wav" });
+}
+
+function writeStr(view, offset, str) {
+  for (let i = 0; i < str.length; i++) {
+    view.setUint8(offset + i, str.charCodeAt(i));
+  }
+}
+
+// ---------- Contador de caracteres ----------
+
+const MAX_CHARS = {{ limits.max_chars }};
+const textInput = document.getElementById("textInput");
+const charCounter = document.getElementById("charCounter");
+
+function updateCharCounter() {
+  const len = textInput.value.length;
+  charCounter.textContent = `${len} / ${MAX_CHARS}`;
+  charCounter.classList.toggle("over", len > MAX_CHARS);
+}
+textInput.addEventListener("input", updateCharCounter);
+updateCharCounter();
+
+// ---------- Generación (en segundo plano, con sondeo del estado) ----------
+
+async function pollJob(jobId, meterLabel) {
+  const started = Date.now();
+  while (true) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const res = await fetch(`/api/jobs/${jobId}`);
+    const data = await res.json();
+
+    if (data.status === "done") {
+      return { ok: true, file: data.file };
+    }
+    if (data.status === "error") {
+      return { ok: false, error: data.error || "Ocurrió un error generando el audio." };
+    }
+    const secs = Math.floor((Date.now() - started) / 1000);
+    meterLabel.textContent = data.status === "processing"
+      ? `Generando audio... (${secs}s, puede tardar varios minutos)`
+      : `En cola... (${secs}s)`;
+  }
+}
+
+document.getElementById("generateBtn").addEventListener("click", async () => {
+  const text = textInput.value.trim();
+  const language = document.getElementById("langSelect").value;
+  const meter = document.getElementById("meter");
+  const meterLabel = document.getElementById("meterLabel");
+  const btn = document.getElementById("generateBtn");
+
+  if (!text) {
+    meterLabel.textContent = "Escribe un texto primero.";
+    return;
+  }
+  if (text.length > MAX_CHARS) {
+    meterLabel.textContent = `Tu plan permite hasta ${MAX_CHARS} caracteres por audio.`;
+    return;
+  }
+  if (!selectedVoice) {
+    meterLabel.textContent = "Selecciona o añade una voz primero.";
+    return;
+  }
+
+  btn.disabled = true;
+  meter.classList.add("active");
+  meterLabel.textContent = "Encolando...";
+
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, voice: selectedVoice, language }),
+    });
+    const data = await res.json();
+
+    if (!data.ok) {
+      meterLabel.textContent = data.error || "Ocurrió un error generando el audio.";
+      return;
+    }
+
+    const result = await pollJob(data.job_id, meterLabel);
+    if (result.ok) {
+      const audio = document.getElementById("resultAudio");
+      const link = document.getElementById("downloadLink");
+      const src = `/outputs/${result.file}?t=${Date.now()}`;
+      audio.src = src;
+      link.href = src;
+      document.getElementById("resultEmpty").style.display = "none";
+      document.getElementById("resultBox").style.display = "block";
+      meterLabel.textContent = "Listo.";
+    } else {
+      meterLabel.textContent = result.error;
+    }
+  } catch (err) {
+    meterLabel.textContent = "Error de conexión: " + err.message;
+  } finally {
+    btn.disabled = false;
+    meter.classList.remove("active");
+  }
+});
+
+// ---------- Init ----------
+
+loadVoices();
+</script>
+</body>
+</html>
