@@ -30,6 +30,22 @@
       <a class="btn secondary" href="{{ url_for('billing.planes') }}" style="display:inline-block; text-decoration:none;">Administrar suscripción</a>
     {% endif %}
   </section>
+
+  <section class="panel" style="margin-top:16px;">
+    <p style="margin-bottom:8px;">
+      Almacenamiento usado:
+      <strong>{{ "%.1f"|format(storage.used_mb) }} MB</strong> de {{ storage.max_mb }} MB
+    </p>
+    <div style="background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; height: 10px; overflow: hidden;">
+      <div style="height: 100%; width: {{ storage.percent }}%; background: {{ 'var(--danger)' if storage.percent >= 90 else 'var(--accent)' }};"></div>
+    </div>
+    <p class="panel-sub" style="margin-top:8px;">
+      Incluye las voces de referencia guardadas y los audios generados.
+      {% if storage.percent >= 90 %}
+        Estás cerca del límite de tu plan — borrá voces o audios viejos, o pasate a Pro para tener más espacio.
+      {% endif %}
+    </p>
+  </section>
 </div>
 </body>
 </html>

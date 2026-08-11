@@ -65,5 +65,30 @@ else:
             conn.execute(text(stmt))
     print(f"Listo: se aplicaron {len(statements)} cambio(s) a la tabla 'users'.")
 
+# --- Columnas de tamaño para el cálculo de almacenamiento usado ---
+extra_statements = []
+
+if "voices" in inspector.get_table_names():
+    voice_columns = {c["name"] for c in inspector.get_columns("voices")}
+    if "size_bytes" not in voice_columns:
+        extra_statements.append("ALTER TABLE voices ADD COLUMN size_bytes BIGINT NOT NULL DEFAULT 0")
+
+if "jobs" in inspector.get_table_names():
+    job_columns = {c["name"] for c in inspector.get_columns("jobs")}
+    if "output_size_bytes" not in job_columns:
+        extra_statements.append("ALTER TABLE jobs ADD COLUMN output_size_bytes BIGINT NOT NULL DEFAULT 0")
+
+if extra_statements:
+    with engine.begin() as conn:
+        for stmt in extra_statements:
+            print("Ejecutando:", stmt)
+            conn.execute(text(stmt))
+    print(f"Listo: se aplicaron {len(extra_statements)} cambio(s) a 'voices'/'jobs'.")
+    print("Nota: las voces y audios que ya existían quedan con tamaño 0 hasta que")
+    print("se vuelvan a subir/generar (no afecta su funcionamiento, solo el cálculo")
+    print("de almacenamiento usado que se muestra en /cuenta).")
+else:
+    print("'voices' y 'jobs' ya tienen las columnas de tamaño. Nada para hacer.")
+
 print("\nAhora corré tu app normalmente: al arrancar, db.create_all() va a "
       "crear las tablas nuevas (login_events, page_views) si todavía no existen.")

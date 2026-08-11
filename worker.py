@@ -69,6 +69,7 @@ def _process_job(app, job_id: int, voices_dir: Path, output_dir: Path) -> None:
             )
             job.status = "done"
             job.output_filename = out_filename
+            job.output_size_bytes = out_path.stat().st_size
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
             job.status = "error"

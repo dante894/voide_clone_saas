@@ -51,6 +51,22 @@ class User(UserMixin, db.Model):
             Job.created_at >= today_start,
         ).count()
 
+    def storage_used_bytes(self) -> int:
+        """Espacio ocupado por las voces guardadas + audios generados de este usuario."""
+        from sqlalchemy import func
+
+        voices_bytes = (
+            db.session.query(func.coalesce(func.sum(Voice.size_bytes), 0))
+            .filter(Voice.user_id == self.id)
+            .scalar()
+        )
+        outputs_bytes = (
+            db.session.query(func.coalesce(func.sum(Job.output_size_bytes), 0))
+            .filter(Job.user_id == self.id, Job.status == "done")
+            .scalar()
+        )
+        return int(voices_bytes or 0) + int(outputs_bytes or 0)
+
 
 class LoginEvent(db.Model):
     """Un registro por cada inicio de sesión, para estadísticas."""
@@ -81,6 +97,7 @@ class Voice(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     filename = db.Column(db.String(255), nullable=False)   # nombre real en disco
     display_name = db.Column(db.String(255), nullable=False)
+    size_bytes = db.Column(db.BigInteger, nullable=False, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
@@ -98,6 +115,7 @@ class Job(db.Model):
     status = db.Column(db.String(20), nullable=False, default="pending")
     # pending | processing | done | error
     output_filename = db.Column(db.String(255))
+    output_size_bytes = db.Column(db.BigInteger, nullable=False, default=0)
     error_message = db.Column(db.Text)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

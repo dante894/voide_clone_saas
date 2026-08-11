@@ -179,7 +179,8 @@ def register_routes(app: Flask) -> None:
             counter += 1
 
         file.save(VOICES_DIR / filename)
-        voice = Voice(user_id=current_user.id, filename=filename, display_name=base_name)
+        size_bytes = (VOICES_DIR / filename).stat().st_size
+        voice = Voice(user_id=current_user.id, filename=filename, display_name=base_name, size_bytes=size_bytes)
         db.session.add(voice)
         db.session.commit()
         return jsonify({"ok": True, "filename": filename, "id": voice.id})
@@ -255,7 +256,16 @@ def register_routes(app: Flask) -> None:
     @app.route("/cuenta")
     @login_required
     def cuenta():
-        return render_template("cuenta.html", user=current_user)
+        plan = "pro" if current_user.is_pro else "free"
+        limits = config.PLAN_LIMITS[plan]
+        used_bytes = current_user.storage_used_bytes()
+        max_bytes = limits["max_storage_mb"] * 1024 * 1024
+        storage = {
+            "used_mb": used_bytes / (1024 * 1024),
+            "max_mb": limits["max_storage_mb"],
+            "percent": min(100, round(used_bytes / max_bytes * 100, 1)) if max_bytes else 0,
+        }
+        return render_template("cuenta.html", user=current_user, storage=storage)
 
 
 app = create_app()

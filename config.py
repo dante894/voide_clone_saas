@@ -28,7 +28,7 @@ MP_PUBLIC_KEY = os.environ.get("MP_PUBLIC_KEY", "")
 MP_PLAN_ID = os.environ.get("MP_PLAN_ID", "")
 # Secreto para validar la firma de los webhooks de Mercado Pago (recomendado).
 MP_WEBHOOK_SECRET = os.environ.get("MP_WEBHOOK_SECRET", "")
-MP_PRO_PRICE_ARS = os.environ.get("MP_PRO_PRICE_ARS", "20000")
+MP_PRO_PRICE_ARS = os.environ.get("MP_PRO_PRICE_ARS", "9999")
 
 # --- Almacenamiento de voces / audios ---
 # En Render, si querés que sobrevivan a los redeploys, montá un Persistent Disk
@@ -58,10 +58,12 @@ PLAN_LIMITS = {
         "max_chars": 300,           # caracteres máximos por generación
         "max_voices": 1,            # voces de referencia guardadas
         "max_generations_per_day": 5,
+        "max_storage_mb": 50,        # espacio total (voces + audios generados)
     },
     "pro": {
         "max_chars": 5000,
         "max_voices": 10,
         "max_generations_per_day": 100,
+        "max_storage_mb": 1000,
     },
 }
