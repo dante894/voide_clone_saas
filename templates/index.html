@@ -109,7 +109,10 @@
     <div id="resultBox" style="display:none;">
       <audio id="resultAudio" controls></audio>
       <br>
-      <a id="downloadLink" class="download-link" download>Descargar archivo .wav</a>
+      <button id="downloadBtn" class="download-link" type="button" style="cursor:pointer;">Descargar archivo .wav</button>
+      <p class="panel-sub" id="downloadNote" style="margin-top:6px;">
+        Al descargarlo se borra del servidor — no queda guardado en la nube.
+      </p>
     </div>
   </section>
 
@@ -454,10 +457,14 @@ document.getElementById("generateBtn").addEventListener("click", async () => {
     const result = await pollJob(data.job_id, meterLabel);
     if (result.ok) {
       const audio = document.getElementById("resultAudio");
-      const link = document.getElementById("downloadLink");
+      const downloadBtn = document.getElementById("downloadBtn");
+      const downloadNote = document.getElementById("downloadNote");
       const src = `/outputs/${result.file}?t=${Date.now()}`;
       audio.src = src;
-      link.href = src;
+      currentOutputFile = result.file;
+      downloadBtn.disabled = false;
+      downloadBtn.textContent = "Descargar archivo .wav";
+      downloadNote.textContent = "Al descargarlo se borra del servidor — no queda guardado en la nube.";
       document.getElementById("resultEmpty").style.display = "none";
       document.getElementById("resultBox").style.display = "block";
       meterLabel.textContent = "Listo.";
@@ -469,6 +476,50 @@ document.getElementById("generateBtn").addEventListener("click", async () => {
   } finally {
     btn.disabled = false;
     meter.classList.remove("active");
+  }
+});
+
+// ---------- Descarga (borra el archivo del servidor al descargarlo) ----------
+
+let currentOutputFile = null;
+
+document.getElementById("downloadBtn").addEventListener("click", async () => {
+  if (!currentOutputFile) return;
+  const downloadBtn = document.getElementById("downloadBtn");
+  const downloadNote = document.getElementById("downloadNote");
+  const audio = document.getElementById("resultAudio");
+
+  downloadBtn.disabled = true;
+  downloadBtn.textContent = "Descargando...";
+
+  try {
+    const res = await fetch(`/outputs/${currentOutputFile}/download`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      downloadNote.textContent = data.error || "No se pudo descargar el audio.";
+      downloadBtn.disabled = false;
+      downloadBtn.textContent = "Descargar archivo .wav";
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "audio.wav";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    downloadBtn.textContent = "Ya descargado";
+    downloadNote.textContent = "Listo — el archivo se borró del servidor. Guardalo bien, no se puede volver a descargar.";
+    audio.removeAttribute("src");
+    audio.load();
+    currentOutputFile = null;
+  } catch (err) {
+    downloadNote.textContent = "Error de conexión: " + err.message;
+    downloadBtn.disabled = false;
+    downloadBtn.textContent = "Descargar archivo .wav";
   }
 });
 

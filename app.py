@@ -15,7 +15,7 @@ import os
 import re
 from pathlib import Path
 
-from flask import Flask, jsonify, redirect, render_template, request, send_from_directory, url_for
+from flask import Flask, after_this_request, jsonify, redirect, render_template, request, send_from_directory, url_for
 from flask_login import LoginManager, current_user, login_required
 
 import config
@@ -247,11 +247,47 @@ def register_routes(app: Flask) -> None:
     @app.route("/outputs/<path:filename>")
     @login_required
     def serve_output(filename):
-        # Solo se puede descargar un audio generado por el propio usuario.
+        # Reproducción dentro de la página (el reproductor <audio>). No borra
+        # el archivo — para eso está /outputs/<filename>/download.
         job = Job.query.filter_by(output_filename=filename, user_id=current_user.id).first()
         if not job:
             return jsonify({"error": "No autorizado"}), 403
         return send_from_directory(OUTPUT_DIR, filename, as_attachment=False)
+
+    @app.route("/outputs/<path:filename>/download")
+    @login_required
+    def download_output(filename):
+        # Descarga real del archivo. Apenas termina de enviarse, se borra del
+        # servidor: así no se va acumulando espacio con audios ya entregados.
+        job = Job.query.filter_by(
+            output_filename=filename, user_id=current_user.id, status="done"
+        ).first()
+        if not job:
+            return jsonify({"error": "No autorizado o el audio ya fue descargado"}), 404
+
+        file_path = OUTPUT_DIR / filename
+        if not file_path.exists():
+            return jsonify({"error": "El audio ya no está disponible en el servidor"}), 404
+
+        job_id = job.id
+
+        @after_this_request
+        def _delete_after_send(response):
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+                j = db.session.get(Job, job_id)
+                if j:
+                    j.output_filename = None
+                    j.output_size_bytes = 0
+                    db.session.commit()
+            except Exception:  # noqa: BLE001
+                app.logger.exception("No se pudo borrar el audio descargado (job %s)", job_id)
+            return response
+
+        return send_from_directory(
+            OUTPUT_DIR, filename, as_attachment=True, download_name=f"audio_{job_id}.wav"
+        )
 
     @app.route("/cuenta")
     @login_required

@@ -90,8 +90,11 @@ En producción (Render) esto ya viene resuelto en `DEPLOY.md`.
 2. **Guion**: escribí el texto (respetando el límite de caracteres de tu
    plan) y elegí el idioma.
 3. **Generar audio**: se encola el trabajo; la página va mostrando el
-   estado ("en cola" → "generando" → "listo") y te deja escuchar y
-   descargar el resultado en `.wav` cuando termina.
+   estado ("en cola" → "generando" → "listo") y te deja escuchar el
+   resultado. **Al tocar "Descargar", el archivo se borra del servidor** en
+   cuanto termina de bajarse a tu dispositivo — no queda guardado ahí, así
+   que asegurate de guardarlo bien en tu computadora/teléfono antes de
+   cerrar la página (no se puede volver a descargar después).
 
 ---
 
