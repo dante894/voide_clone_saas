@@ -30,6 +30,13 @@ MP_PLAN_ID = os.environ.get("MP_PLAN_ID", "")
 MP_WEBHOOK_SECRET = os.environ.get("MP_WEBHOOK_SECRET", "")
 MP_PRO_PRICE_ARS = os.environ.get("MP_PRO_PRICE_ARS", "9999")
 
+# --- Motor de generación de audio (Hugging Face Space) ---
+# En vez de cargar XTTS-v2 en este mismo servidor (pesa demasiada RAM para
+# el plan Free de Render), la generación se delega a un Space de Hugging
+# Face. Ver carpeta hf_space/ para el código de ese servidor.
+HF_SPACE_URL = os.environ.get("HF_SPACE_URL", "")  # ej: https://tuusuario-estudio-de-voz.hf.space
+HF_SPACE_SECRET = os.environ.get("HF_SPACE_SECRET", "")
+
 # --- Almacenamiento de voces / audios ---
 # En Render, si querés que sobrevivan a los redeploys, montá un Persistent Disk
 # y apuntá esta variable a esa carpeta (por ejemplo /var/data).

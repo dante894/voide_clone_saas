@@ -30,20 +30,14 @@ BASE_DIR = Path(__file__).resolve().parent
 # Si DATA_DIR está configurado (por ejemplo un Persistent Disk de Render),
 # las voces y audios generados se guardan ahí para que sobrevivan a los
 # redeploys. Si no, se guardan junto al código (se pierden en cada deploy).
+# Nota: el modelo XTTS-v2 ya NO se carga en este proceso — corre en un
+# Hugging Face Space aparte (ver hf_space/ y worker.py), así que esta app
+# no necesita cachear ningún modelo pesado.
 DATA_ROOT = Path(config.DATA_DIR) if config.DATA_DIR else BASE_DIR
 VOICES_DIR = DATA_ROOT / "voices"
 OUTPUT_DIR = DATA_ROOT / "outputs"
 VOICES_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-# Si hay un disco persistente configurado, también guardamos ahí la caché del
-# modelo XTTS-v2 (~1.8 GB). Así se descarga una sola vez y sobrevive a los
-# redeploys, en vez de volver a bajarse cada vez que Render reinicia el disco
-# efímero del contenedor.
-if config.DATA_DIR:
-    cache_dir = DATA_ROOT / "cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("XDG_DATA_HOME", str(cache_dir))
 
 LANGUAGES = {
     "es": "Español", "en": "Inglés", "fr": "Francés", "de": "Alemán",

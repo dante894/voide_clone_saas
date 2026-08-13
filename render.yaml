@@ -4,37 +4,42 @@
 # En el dashboard de Render: "New" -> "Blueprint" -> conectá este repo.
 # Render va a leer este archivo y crear el servicio web + la base de datos.
 #
-# IMPORTANTE: no escales este servicio a más de 1 instancia. La generación
-# de audio corre en un hilo en segundo plano DENTRO del mismo proceso web
-# (ver worker.py); con 2+ instancias cada una tendría su propia cola y el
-# resultado sería impredecible. Como además usamos un disco persistente,
-# Render ya bloquea el escalado horizontal y los despliegues sin downtime
-# por diseño, así que esto queda resuelto solo.
+# IMPORTANTE: no escales este servicio a más de 1 instancia. La cola de
+# generación (worker.py) vive en memoria dentro de un solo proceso; con 2+
+# instancias cada una tendría su propia cola y el resultado sería
+# impredecible.
+#
+# La generación de audio en sí NO corre acá: se delega a un Hugging Face
+# Space (ver hf_space/) que sí tiene la RAM necesaria para XTTS-v2. Por eso
+# este servicio puede vivir cómodo en el plan Free de Render.
 
 services:
   - type: web
     name: estudio-de-voz
     runtime: python
-    plan: standard          # el plan free de Render (512 MB RAM) no alcanza para XTTS-v2
+    plan: free               # alcanza de sobra: ya no se carga el modelo acá
     region: oregon
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:app --workers 1 --threads 4 --timeout 300 --bind 0.0.0.0:$PORT"
     healthCheckPath: /login
-    disk:
-      name: estudio-de-voz-data
-      mountPath: /var/data
-      sizeGB: 10
+    # Si más adelante querés que las voces sobrevivan a los redeploys, subí
+    # este servicio a un plan pago (Starter o superior) y agregá un disco
+    # persistente acá, con DATA_DIR=/var/data. En el plan Free, Render no
+    # permite discos, así que las voces guardadas se pierden en cada
+    # redeploy — aceptable mientras estás probando.
     envVars:
       - key: SECRET_KEY
         generateValue: true
-      - key: DATA_DIR
-        value: /var/data
       - key: APP_BASE_URL
         value: https://estudio-de-voz.onrender.com   # actualizá esto con tu URL real de Render
       - key: DATABASE_URL
         fromDatabase:
           name: estudio-de-voz-db
           property: connectionString
+      - key: HF_SPACE_URL
+        sync: false      # ej: https://tuusuario-estudio-de-voz.hf.space
+      - key: HF_SPACE_SECRET
+        sync: false      # el mismo valor que configuraste como Secret en el Space
       - key: MP_ACCESS_TOKEN
         sync: false     # lo cargás vos a mano en el Dashboard (secreto)
       - key: MP_PUBLIC_KEY

@@ -58,43 +58,89 @@ Guardá ese valor, lo vas a necesitar en el paso 4.
 
 ---
 
-## 3. Crear el servicio en Render (Blueprint)
+## 3. Motor de generación de audio en Hugging Face (recomendado, gratis)
+
+XTTS-v2 necesita varios GB de RAM para cargarse — más de lo que da el plan
+Free de Render. En vez de pagar un plan más caro, se puede correr el modelo
+en un Hugging Face Space gratuito (2 vCPU / 16 GB RAM) y que la app en
+Render le pida el audio por HTTP. El código de ese Space ya está armado en
+la carpeta `hf_space/` de este proyecto.
+
+1. Creá una cuenta en [huggingface.co](https://huggingface.co) si no tenés.
+2. Andá a **New Space** (huggingface.co/new-space). Nombre: por ejemplo
+   `estudio-de-voz`. **SDK: Docker**. Visibilidad: Public o Private (con
+   Private necesitás un token para el health check, con Public alcanza con
+   el secreto del endpoint `/generate`). Hardware: CPU Basic (gratis).
+3. Subí el contenido de la carpeta `hf_space/` (Dockerfile, app.py,
+   requirements.txt, README.md) a la raíz del repositorio del Space —
+   podés arrastrarlos desde la interfaz web de Hugging Face, o clonar el
+   repo del Space con git y hacer push:
+   ```bash
+   git clone https://huggingface.co/spaces/TU-USUARIO/estudio-de-voz
+   cp hf_space/* estudio-de-voz/
+   cd estudio-de-voz
+   git add . && git commit -m "Motor de generación" && git push
+   ```
+4. En el Space → **Settings → Variables and secrets**, agregá un secreto:
+   ```
+   SPACE_API_SECRET = <una clave larga y random que vos elijas>
+   ```
+5. Esperá a que el Space termine de construir (el ícono pasa a verde
+   "Running"). Entrá a `https://TU-USUARIO-estudio-de-voz.hf.space/health`
+   y confirmá que responda `{"status":"ok",...}`.
+6. En Render, agregá estas variables de entorno al servicio web:
+   ```
+   HF_SPACE_URL=https://TU-USUARIO-estudio-de-voz.hf.space
+   HF_SPACE_SECRET=<la misma clave que pusiste en el paso 4>
+   ```
+7. Con esto, el servicio web de Render puede quedarse en el plan **Free**
+   sin problema — ya no carga PyTorch ni el modelo, solo le pide el audio
+   al Space.
+
+**Nota sobre la primera generación después de inactividad**: en el plan
+gratis, el Space se pausa tras un tiempo sin uso y tarda unos segundos (o
+más, la primera vez que carga el modelo) en despertar. Es esperable, no un
+error — el trabajo va a decir "en cola" un poco más esa primera vez.
+
+## 4. Crear el servicio en Render (Blueprint)
 
 1. En el dashboard de Render: **New → Blueprint**.
 2. Conectá el repositorio. Render va a detectar `render.yaml` y proponer:
-   - Un **Web Service** (`estudio-de-voz`) en plan `standard` (el plan Free
-     de Render, con 512 MB de RAM, no alcanza para correr XTTS-v2).
+   - Un **Web Service** (`estudio-de-voz`) en plan **Free** — alcanza de
+     sobra porque el modelo XTTS-v2 ya NO corre acá (corre en el Hugging
+     Face Space del paso anterior).
    - Una base de datos **Postgres** (`estudio-de-voz-db`).
-   - Un **disco persistente** de 10 GB montado en `/var/data`, donde se
-     guardan las voces, los audios generados y la caché del modelo (para no
-     tener que volver a descargar 1.8 GB en cada deploy).
 3. Cuando te pida las variables marcadas `sync: false`, cargá:
-   - `MP_ACCESS_TOKEN`
-   - `MP_PUBLIC_KEY`
-   - `MP_PLAN_ID` (el que obtuviste en el paso 2)
-4. Confirmá la creación. El primer deploy va a tardar varios minutos
-   (instala PyTorch y descarga el modelo la primera vez que alguien genera
-   un audio).
+   - `MP_ACCESS_TOKEN`, `MP_PUBLIC_KEY`, `MP_PLAN_ID` (el que obtuviste en
+     el paso 2)
+   - `HF_SPACE_URL` y `HF_SPACE_SECRET` (los del paso 3)
+4. Confirmá la creación. El primer deploy debería ser rápido — ya no
+   instala PyTorch acá.
 
 > ⚠️ No cambies el número de instancias a más de 1. La cola de generación
 > vive en memoria dentro de un solo proceso; con más instancias, cada una
-> tendría su propia cola y el comportamiento sería inconsistente. Como el
-> servicio tiene un disco persistente, Render ya bloquea el escalado
-> horizontal automáticamente, así que esto está cubierto por diseño.
+> tendría su propia cola y el comportamiento sería inconsistente.
+
+> 💡 Sin disco persistente, las voces guardadas se pierden en cada
+> redeploy (aceptable mientras estás probando). Si más adelante querés que
+> sobrevivan, subí este servicio a un plan pago (Starter o superior) y
+> agregá un disco en `/var/data` con `DATA_DIR=/var/data` — no hace falta
+> volver a subir a Standard, con Starter alcanza porque el modelo no corre
+> acá.
 
 ### Si preferís crearlo a mano en vez de con Blueprint
 
 Creá un Web Service normal apuntando a este repo, con:
+- Runtime: Python 3 (no Docker)
 - Build command: `pip install -r requirements.txt`
 - Start command: `gunicorn app:app --workers 1 --threads 4 --timeout 300 --bind 0.0.0.0:$PORT`
-- Agregá un disco persistente en `/var/data` y las variables de entorno de
-  `.env.example` (con `DATA_DIR=/var/data`).
+- Las variables de entorno de `.env.example`.
 - Agregá una base de datos Postgres y copiá su "Internal Connection String"
   en `DATABASE_URL`.
 
 ---
 
-## 4. Actualizar `APP_BASE_URL` con la URL real
+## 5. Actualizar `APP_BASE_URL` con la URL real
 
 Una vez que Render te asigna la URL definitiva (por ejemplo
 `https://estudio-de-voz.onrender.com`), actualizá la variable de entorno
@@ -103,7 +149,7 @@ armar el link de retorno de Mercado Pago).
 
 ---
 
-## 5. Configurar el webhook de Mercado Pago
+## 6. Configurar el webhook de Mercado Pago
 
 En el [panel de Mercado Pago](https://www.mercadopago.com/developers/panel) →
 tu aplicación → **Webhooks**, agregá esta URL:
@@ -119,7 +165,7 @@ usuario vuelva a tu sitio.
 
 ---
 
-## 6. Probar el flujo completo
+## 7. Probar el flujo completo
 
 1. Entrá a tu app → `/registro` → creá una cuenta.
 2. Andá a `/planes` → "Pasarme a Pro con Mercado Pago" → te redirige al
@@ -134,7 +180,7 @@ usuario vuelva a tu sitio.
 
 ---
 
-## 7. Login con Google (opcional)
+## 8. Login con Google (opcional)
 
 1. En la [consola de Google Cloud](https://console.cloud.google.com/apis/credentials),
    creá credenciales tipo **"ID de cliente de OAuth"** → Aplicación web.
@@ -151,7 +197,7 @@ Si un email ya tenía cuenta creada con contraseña y esa persona después
 entra con Google usando el mismo email, la app une ambas cuentas (no crea
 una duplicada).
 
-## 8. Panel de administración
+## 9. Panel de administración
 
 1. Definí la variable de entorno `ADMIN_EMAILS` en Render con tu email (o
    varios, separados por coma): `ADMIN_EMAILS=vos@tuemail.com`.
@@ -171,20 +217,25 @@ una duplicada).
 > perder los datos existentes. Las tablas nuevas (`login_events`,
 > `page_views`) las crea solo `db.create_all()` al arrancar la app.
 
-## 9. Costos a tener en cuenta
+## 10. Costos a tener en cuenta
 
-- Render: el plan `standard` (necesario para correr XTTS-v2 con margen de
-  RAM) y el disco persistente tienen costo mensual — revisá los precios
-  actuales en render.com/pricing antes de lanzar.
+- Con este esquema (Render Free + Hugging Face Space CPU Basic), **la app
+  no tiene costo fijo mensual**. Vas a pagar solo si más adelante subís
+  Render a un plan pago (para tener disco persistente) o si el Space
+  necesita más recursos que el free tier de Hugging Face.
+- El Space de Hugging Face gratis se pausa tras un tiempo sin uso — la
+  primera generación después de una pausa tarda más (tiene que despertar y
+  cargar el modelo de nuevo).
 - Mercado Pago cobra una comisión por transacción sobre cada cobro de la
   suscripción (revisá el porcentaje vigente en tu panel).
-- Generar audio con XTTS-v2 en CPU es lento (minutos por frase). Si el
-  volumen crece, vas a necesitar un plan de Render con más CPU, o mover la
-  inferencia a un servicio con GPU.
+- Generar audio con XTTS-v2 en CPU sigue siendo lento (minutos por frase,
+  sin GPU). Si el volumen crece mucho, vas a necesitar un Space con GPU de
+  pago en Hugging Face, o mover la inferencia a un servicio de GPU por uso
+  (Replicate, Modal).
 
 ---
 
-## 10. Recordatorio de uso responsable
+## 11. Recordatorio de uso responsable
 
 El README original ya lo advertía y sigue aplicando: usá esto solo con voces
 de personas que dieron su consentimiento, o con tu propia voz. Como ahora es

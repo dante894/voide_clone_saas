@@ -1,44 +1,66 @@
 """
 Cola simple de generación de audio en segundo plano.
 
-XTTS-v2 en CPU (Render sin GPU) puede tardar 1-3 minutos por frase, así que
-no conviene generar el audio dentro de la misma petición HTTP (se pasaría el
-timeout de gunicorn). En cambio: se crea un "Job" en la base de datos, se
-encola acá, y el frontend consulta el estado con /api/jobs/<id>.
+La generación en sí NO corre acá — se le pide por HTTP a un Hugging Face
+Space (ver carpeta hf_space/) que tiene la RAM necesaria para cargar
+XTTS-v2. Esto le permite a la app principal (en Render) quedarse liviana y
+funcionar en el plan Free, sin cargar PyTorch ni el modelo en este proceso.
 
-Se usa un solo worker en paralelo (max_workers=1) a propósito: correr más de
-una generación de XTTS-v2 a la vez en un servidor sin GPU y con RAM limitada
-puede tirar el proceso por falta de memoria.
+Se sigue usando una cola con un solo worker (no por límite de RAM local,
+sino para no mandar varias peticiones pesadas en simultáneo al Space, que
+también tiene recursos limitados).
 """
 
 import queue
 import threading
 import traceback
+import uuid
 from datetime import datetime
 from pathlib import Path
 
+import requests
+
+import config
+
 _job_queue: "queue.Queue[int]" = queue.Queue()
-_tts_model = None
-_model_lock = threading.Lock()
 
-
-def get_model():
-    """Carga el modelo XTTS-v2 una sola vez (perezoso, hilo-seguro)."""
-    global _tts_model
-    with _model_lock:
-        if _tts_model is None:
-            import torch
-            from TTS.api import TTS
-
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            print(f"[worker] Cargando modelo XTTS-v2 en: {device} ...")
-            _tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
-            print("[worker] Modelo listo.")
-        return _tts_model
+# Generar un audio puede tardar varios minutos si el Space estaba "dormido"
+# (tiene que despertar + cargar el modelo) además del tiempo de inferencia.
+GENERATE_TIMEOUT_SECONDS = 600
 
 
 def enqueue_job(job_id: int) -> None:
     _job_queue.put(job_id)
+
+
+def _call_remote_generate(text: str, language: str, speaker_wav_path: Path) -> bytes:
+    if not config.HF_SPACE_URL:
+        raise RuntimeError(
+            "Falta configurar HF_SPACE_URL: la app no sabe a qué servidor "
+            "pedirle la generación de audio."
+        )
+
+    url = config.HF_SPACE_URL.rstrip("/") + "/generate"
+    headers = {}
+    if config.HF_SPACE_SECRET:
+        headers["Authorization"] = f"Bearer {config.HF_SPACE_SECRET}"
+
+    with open(speaker_wav_path, "rb") as f:
+        files = {"speaker_wav": (speaker_wav_path.name, f, "audio/wav")}
+        data = {"text": text, "language": language}
+        resp = requests.post(
+            url, data=data, files=files, headers=headers, timeout=GENERATE_TIMEOUT_SECONDS
+        )
+
+    if resp.status_code != 200:
+        # El Space devuelve errores en JSON ({"detail": "..."})
+        try:
+            detail = resp.json().get("detail", resp.text)
+        except Exception:  # noqa: BLE001
+            detail = resp.text
+        raise RuntimeError(f"El servidor de generación devolvió un error: {detail}")
+
+    return resp.content
 
 
 def _process_job(app, job_id: int, voices_dir: Path, output_dir: Path) -> None:
@@ -52,21 +74,16 @@ def _process_job(app, job_id: int, voices_dir: Path, output_dir: Path) -> None:
         db.session.commit()
 
         try:
-            model = get_model()
             speaker_wav = voices_dir / job.voice_filename
             if not speaker_wav.exists():
                 raise FileNotFoundError("El archivo de voz de referencia ya no existe.")
 
-            import uuid
+            audio_bytes = _call_remote_generate(job.text, job.language, speaker_wav)
 
             out_filename = f"{uuid.uuid4().hex}.wav"
             out_path = output_dir / out_filename
-            model.tts_to_file(
-                text=job.text,
-                speaker_wav=str(speaker_wav),
-                language=job.language,
-                file_path=str(out_path),
-            )
+            out_path.write_bytes(audio_bytes)
+
             job.status = "done"
             job.output_filename = out_filename
             job.output_size_bytes = out_path.stat().st_size

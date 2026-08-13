@@ -4,6 +4,3 @@ flask-sqlalchemy==3.1.1
 psycopg2-binary==2.9.9
 gunicorn==22.0.0
 requests==2.32.3
-coqui-tts==0.27.5
-torch==2.4.1
-torchaudio==2.4.1
