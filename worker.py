@@ -1,14 +1,15 @@
 """
 Cola simple de generación de audio en segundo plano.
 
-La generación en sí NO corre acá — se le pide por HTTP a un Hugging Face
-Space (ver carpeta hf_space/) que tiene la RAM necesaria para cargar
-XTTS-v2. Esto le permite a la app principal (en Render) quedarse liviana y
-funcionar en el plan Free, sin cargar PyTorch ni el modelo en este proceso.
+La generación en sí NO corre acá — se le pide por HTTP a un servicio
+externo (ver carpeta cloud_run/, pensado para Google Cloud Run) que tiene
+la RAM necesaria para cargar XTTS-v2. Esto le permite a la app principal
+(en Render) quedarse liviana y funcionar en el plan Free, sin cargar
+PyTorch ni el modelo en este proceso.
 
 Se sigue usando una cola con un solo worker (no por límite de RAM local,
-sino para no mandar varias peticiones pesadas en simultáneo al Space, que
-también tiene recursos limitados).
+sino para no mandar varias peticiones pesadas en simultáneo al servicio
+externo, que también tiene recursos limitados).
 """
 
 import queue
@@ -24,8 +25,9 @@ import config
 
 _job_queue: "queue.Queue[int]" = queue.Queue()
 
-# Generar un audio puede tardar varios minutos si el Space estaba "dormido"
-# (tiene que despertar + cargar el modelo) además del tiempo de inferencia.
+# Generar un audio puede tardar varios minutos si el servicio estaba
+# "dormido" (Cloud Run con min-instances=0 tarda unos segundos en levantar
+# el contenedor) además del tiempo de inferencia.
 GENERATE_TIMEOUT_SECONDS = 600
 
 
@@ -34,16 +36,16 @@ def enqueue_job(job_id: int) -> None:
 
 
 def _call_remote_generate(text: str, language: str, speaker_wav_path: Path) -> bytes:
-    if not config.HF_SPACE_URL:
+    if not config.VOICE_ENGINE_URL:
         raise RuntimeError(
-            "Falta configurar HF_SPACE_URL: la app no sabe a qué servidor "
+            "Falta configurar VOICE_ENGINE_URL: la app no sabe a qué servidor "
             "pedirle la generación de audio."
         )
 
-    url = config.HF_SPACE_URL.rstrip("/") + "/generate"
+    url = config.VOICE_ENGINE_URL.rstrip("/") + "/generate"
     headers = {}
-    if config.HF_SPACE_SECRET:
-        headers["Authorization"] = f"Bearer {config.HF_SPACE_SECRET}"
+    if config.VOICE_ENGINE_SECRET:
+        headers["Authorization"] = f"Bearer {config.VOICE_ENGINE_SECRET}"
 
     with open(speaker_wav_path, "rb") as f:
         files = {"speaker_wav": (speaker_wav_path.name, f, "audio/wav")}
@@ -53,7 +55,7 @@ def _call_remote_generate(text: str, language: str, speaker_wav_path: Path) -> b
         )
 
     if resp.status_code != 200:
-        # El Space devuelve errores en JSON ({"detail": "..."})
+        # El servicio devuelve errores en JSON ({"detail": "..."})
         try:
             detail = resp.json().get("detail", resp.text)
         except Exception:  # noqa: BLE001

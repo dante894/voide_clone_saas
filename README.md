@@ -15,10 +15,10 @@ es multiusuario, pensada para desplegarse en Render con:
 > su permiso (o tu propia voz). Generar audio con la voz de alguien sin su
 > consentimiento puede ser ilegal y, en cualquier caso, es una mala idea.
 
-La generación de audio (XTTS-v2) corre en un **Hugging Face Space** aparte
-(gratis), no en Render — así la app web puede vivir en el plan Free de
-Render sin problemas de memoria. Ver `DEPLOY.md`, sección 3, para
-configurarlo.
+La generación de audio (XTTS-v2) corre en un **servicio aparte en Google
+Cloud Run** (gratis dentro de la cuota mensual), no en Render — así la app
+web puede vivir en el plan Free de Render sin problemas de memoria. Ver
+`DEPLOY.md`, sección 3, para configurarlo.
 
 Para desplegarlo en Render con cobros por Mercado Pago, seguí **`DEPLOY.md`**
 — tiene la guía completa paso a paso.
@@ -33,11 +33,11 @@ config.py            # Variables de entorno y límites de cada plan
 models.py            # Modelos de base de datos (User, Voice, Job)
 auth.py              # Registro / login / logout / login con Google
 billing.py           # Integración con Mercado Pago (suscripciones + webhook)
-worker.py            # Cola de generación: le pide el audio al Hugging Face Space
+worker.py            # Cola de generación: le pide el audio al servicio de Cloud Run
 admin.py              # Panel de administración (/admin)
 templates/           # HTML (index, login, registro, planes, cuenta, admin)
 static/style.css      # Estilos compartidos
-hf_space/              # Código para el Space de Hugging Face (motor XTTS-v2)
+cloud_run/              # Código para el servicio de Cloud Run (motor XTTS-v2)
   app.py                # Servidor FastAPI con el endpoint /generate
   Dockerfile
   requirements.txt
@@ -56,8 +56,8 @@ DEPLOY.md               # Guía de despliegue completa
 ## Correr en local
 
 Requisitos: Python 3.10, 3.11 o 3.12. Esta app YA NO corre el modelo
-XTTS-v2 localmente — se lo pide por HTTP al Hugging Face Space (ver
-`hf_space/`), así que no hace falta instalar PyTorch para levantar la app
+XTTS-v2 localmente — se lo pide por HTTP al servicio de Cloud Run (ver
+`cloud_run/`), así que no hace falta instalar PyTorch para levantar la app
 principal.
 
 ```bash
@@ -66,7 +66,7 @@ source venv/bin/activate        # en Windows: venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 # Editá .env: como mínimo poné un SECRET_KEY propio.
-# Si todavía no tenés HF_SPACE_URL/HF_SPACE_SECRET, la generación de audio
+# Si todavía no tenés VOICE_ENGINE_URL/VOICE_ENGINE_SECRET, la generación de audio
 # va a fallar con un error claro hasta que configures el Space (ver
 # DEPLOY.md sección 3), pero el resto de la app funciona igual.
 # Si todavía no tenés MP_PLAN_ID, el botón "Pasarme a Pro" va a mostrar un

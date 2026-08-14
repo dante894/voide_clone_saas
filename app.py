@@ -31,8 +31,8 @@ BASE_DIR = Path(__file__).resolve().parent
 # las voces y audios generados se guardan ahí para que sobrevivan a los
 # redeploys. Si no, se guardan junto al código (se pierden en cada deploy).
 # Nota: el modelo XTTS-v2 ya NO se carga en este proceso — corre en un
-# Hugging Face Space aparte (ver hf_space/ y worker.py), así que esta app
-# no necesita cachear ningún modelo pesado.
+# servicio aparte (ver cloud_run/ y worker.py), así que esta app no
+# necesita cachear ningún modelo pesado.
 DATA_ROOT = Path(config.DATA_DIR) if config.DATA_DIR else BASE_DIR
 VOICES_DIR = DATA_ROOT / "voices"
 OUTPUT_DIR = DATA_ROOT / "outputs"

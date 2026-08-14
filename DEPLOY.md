@@ -58,62 +58,84 @@ Guardá ese valor, lo vas a necesitar en el paso 4.
 
 ---
 
-## 3. Motor de generación de audio en Hugging Face (recomendado, gratis)
+## 3. Motor de generación de audio en Google Cloud Run (recomendado, gratis)
 
 XTTS-v2 necesita varios GB de RAM para cargarse — más de lo que da el plan
 Free de Render. En vez de pagar un plan más caro, se puede correr el modelo
-en un Hugging Face Space gratuito (2 vCPU / 16 GB RAM) y que la app en
-Render le pida el audio por HTTP. El código de ese Space ya está armado en
-la carpeta `hf_space/` de este proyecto.
+en **Google Cloud Run**, que cobra solo por los segundos que el servicio
+está prendido procesando una petición (y no cobra nada mientras está
+inactivo). Dentro de la cuota gratis mensual (360.000 vCPU-segundos /
+180.000 GiB-segundos), un uso chico o mediano no debería generar cargos. El
+código de ese servicio ya está armado en la carpeta `cloud_run/` de este
+proyecto.
 
-1. Creá una cuenta en [huggingface.co](https://huggingface.co) si no tenés.
-2. Andá a **New Space** (huggingface.co/new-space). Nombre: por ejemplo
-   `estudio-de-voz`. **SDK: Docker**. Visibilidad: Public o Private (con
-   Private necesitás un token para el health check, con Public alcanza con
-   el secreto del endpoint `/generate`). Hardware: CPU Basic (gratis).
-3. Subí el contenido de la carpeta `hf_space/` (Dockerfile, app.py,
-   requirements.txt, README.md) a la raíz del repositorio del Space —
-   podés arrastrarlos desde la interfaz web de Hugging Face, o clonar el
-   repo del Space con git y hacer push:
+1. Creá una cuenta en [Google Cloud](https://console.cloud.google.com) si
+   no tenés (te va a pedir una tarjeta para activarla, aunque el uso se
+   mantenga en $0 dentro de la cuota gratis).
+2. Creá un proyecto nuevo (o usá uno existente): en la barra superior de la
+   consola, selector de proyecto → "New Project".
+3. Instalá `gcloud` (la herramienta de línea de comandos de Google Cloud)
+   siguiendo [cloud.google.com/sdk/docs/install](https://cloud.google.com/sdk/docs/install),
+   y logueate:
    ```bash
-   git clone https://huggingface.co/spaces/TU-USUARIO/estudio-de-voz
-   cp hf_space/* estudio-de-voz/
-   cd estudio-de-voz
-   git add . && git commit -m "Motor de generación" && git push
+   gcloud auth login
+   gcloud config set project TU-PROJECT-ID
+   gcloud services enable run.googleapis.com
    ```
-4. En el Space → **Settings → Variables and secrets**, agregá un secreto:
+4. Elegí una clave secreta random (por ejemplo con
+   `python3 -c "import secrets; print(secrets.token_hex(24))"`) y desplegá
+   el servicio con un solo comando:
+   ```bash
+   cd cloud_run
+   gcloud run deploy estudio-de-voz-engine \
+     --source . \
+     --region us-central1 \
+     --memory 8Gi \
+     --cpu 4 \
+     --timeout 600 \
+     --concurrency 1 \
+     --max-instances 1 \
+     --min-instances 0 \
+     --set-env-vars VOICE_ENGINE_SECRET=<la-clave-que-elegiste> \
+     --allow-unauthenticated
    ```
-   SPACE_API_SECRET = <una clave larga y random que vos elijas>
-   ```
-5. Esperá a que el Space termine de construir (el ícono pasa a verde
-   "Running"). Entrá a `https://TU-USUARIO-estudio-de-voz.hf.space/health`
-   y confirmá que responda `{"status":"ok",...}`.
+   La primera vez, Cloud Run construye la imagen con Cloud Build — puede
+   tardar varios minutos (instala PyTorch). Al final te va a mostrar la URL
+   del servicio, algo como
+   `https://estudio-de-voz-engine-xxxxx-uc.a.run.app`.
+5. Probá que ande: abrí `<esa-URL>/health` en el navegador — debería
+   responder `{"status":"ok","model_loaded":false}`.
 6. En Render, agregá estas variables de entorno al servicio web:
    ```
-   HF_SPACE_URL=https://TU-USUARIO-estudio-de-voz.hf.space
-   HF_SPACE_SECRET=<la misma clave que pusiste en el paso 4>
+   VOICE_ENGINE_URL=https://estudio-de-voz-engine-xxxxx-uc.a.run.app
+   VOICE_ENGINE_SECRET=<la misma clave del paso 4>
    ```
 7. Con esto, el servicio web de Render puede quedarse en el plan **Free**
    sin problema — ya no carga PyTorch ni el modelo, solo le pide el audio
-   al Space.
+   a Cloud Run.
 
-**Nota sobre la primera generación después de inactividad**: en el plan
-gratis, el Space se pausa tras un tiempo sin uso y tarda unos segundos (o
-más, la primera vez que carga el modelo) en despertar. Es esperable, no un
-error — el trabajo va a decir "en cola" un poco más esa primera vez.
+**Nota sobre la primera generación después de inactividad**: con
+`--min-instances 0`, Cloud Run apaga el contenedor cuando nadie lo usa y
+tarda unos segundos (o más, la primera vez que carga el modelo) en
+levantarlo de nuevo ante la próxima petición. Es esperable, no un error —
+el trabajo va a decir "en cola" un poco más esa primera vez.
+
+**Para volver a desplegar** después de cambiar algo en `cloud_run/app.py`,
+corré de nuevo el mismo comando `gcloud run deploy ...` del paso 4 — no
+hace falta repetir los pasos anteriores.
 
 ## 4. Crear el servicio en Render (Blueprint)
 
 1. En el dashboard de Render: **New → Blueprint**.
 2. Conectá el repositorio. Render va a detectar `render.yaml` y proponer:
    - Un **Web Service** (`estudio-de-voz`) en plan **Free** — alcanza de
-     sobra porque el modelo XTTS-v2 ya NO corre acá (corre en el Hugging
-     Face Space del paso anterior).
+     sobra porque el modelo XTTS-v2 ya NO corre acá (corre en el servicio
+     de Cloud Run del paso anterior).
    - Una base de datos **Postgres** (`estudio-de-voz-db`).
 3. Cuando te pida las variables marcadas `sync: false`, cargá:
    - `MP_ACCESS_TOKEN`, `MP_PUBLIC_KEY`, `MP_PLAN_ID` (el que obtuviste en
      el paso 2)
-   - `HF_SPACE_URL` y `HF_SPACE_SECRET` (los del paso 3)
+   - `VOICE_ENGINE_URL` y `VOICE_ENGINE_SECRET` (los del paso 3)
 4. Confirmá la creación. El primer deploy debería ser rápido — ya no
    instala PyTorch acá.
 
@@ -219,19 +241,20 @@ una duplicada).
 
 ## 10. Costos a tener en cuenta
 
-- Con este esquema (Render Free + Hugging Face Space CPU Basic), **la app
-  no tiene costo fijo mensual**. Vas a pagar solo si más adelante subís
-  Render a un plan pago (para tener disco persistente) o si el Space
-  necesita más recursos que el free tier de Hugging Face.
-- El Space de Hugging Face gratis se pausa tras un tiempo sin uso — la
-  primera generación después de una pausa tarda más (tiene que despertar y
-  cargar el modelo de nuevo).
+- Con este esquema (Render Free + Google Cloud Run), **la app no tiene
+  costo fijo mensual** mientras el uso se mantenga dentro de la cuota
+  gratis de Cloud Run (360.000 vCPU-segundos / 180.000 GiB-segundos por
+  mes). Vas a pagar solo si más adelante subís Render a un plan pago (para
+  tener disco persistente) o si el volumen de generación supera esa cuota.
+- Con `--min-instances 0`, Cloud Run apaga el contenedor cuando nadie lo
+  usa — la primera generación después de una pausa tarda más (tiene que
+  levantar el contenedor y cargar el modelo de nuevo).
 - Mercado Pago cobra una comisión por transacción sobre cada cobro de la
   suscripción (revisá el porcentaje vigente en tu panel).
 - Generar audio con XTTS-v2 en CPU sigue siendo lento (minutos por frase,
-  sin GPU). Si el volumen crece mucho, vas a necesitar un Space con GPU de
-  pago en Hugging Face, o mover la inferencia a un servicio de GPU por uso
-  (Replicate, Modal).
+  sin GPU). Si el volumen crece mucho, vas a necesitar más vCPU/memoria en
+  Cloud Run (con más costo), o mover la inferencia a un servicio de GPU por
+  uso (Replicate, Modal).
 
 ---
 

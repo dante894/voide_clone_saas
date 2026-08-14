@@ -9,9 +9,10 @@
 # instancias cada una tendría su propia cola y el resultado sería
 # impredecible.
 #
-# La generación de audio en sí NO corre acá: se delega a un Hugging Face
-# Space (ver hf_space/) que sí tiene la RAM necesaria para XTTS-v2. Por eso
-# este servicio puede vivir cómodo en el plan Free de Render.
+# La generación de audio en sí NO corre acá: se delega a un servicio aparte
+# (ver cloud_run/, pensado para Google Cloud Run) que sí tiene la RAM
+# necesaria para XTTS-v2. Por eso este servicio puede vivir cómodo en el
+# plan Free de Render.
 
 services:
   - type: web
@@ -36,10 +37,10 @@ services:
         fromDatabase:
           name: estudio-de-voz-db
           property: connectionString
-      - key: HF_SPACE_URL
-        sync: false      # ej: https://tuusuario-estudio-de-voz.hf.space
-      - key: HF_SPACE_SECRET
-        sync: false      # el mismo valor que configuraste como Secret en el Space
+      - key: VOICE_ENGINE_URL
+        sync: false      # ej: https://estudio-de-voz-engine-xxxxx-uc.a.run.app (Google Cloud Run)
+      - key: VOICE_ENGINE_SECRET
+        sync: false      # el mismo valor que configuraste en el servicio de Cloud Run
       - key: MP_ACCESS_TOKEN
         sync: false     # lo cargás vos a mano en el Dashboard (secreto)
       - key: MP_PUBLIC_KEY
