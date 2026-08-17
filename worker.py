@@ -43,7 +43,7 @@ def _call_remote_generate(text: str, language: str, speaker_wav_path: Path) -> b
         )
 
     url = config.VOICE_ENGINE_URL.rstrip("/") + "/generate"
-    headers = {}
+    headers = {"ngrok-skip-browser-warning": "true"}
     if config.VOICE_ENGINE_SECRET:
         headers["Authorization"] = f"Bearer {config.VOICE_ENGINE_SECRET}"
 
