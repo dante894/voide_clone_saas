@@ -43,7 +43,12 @@ def _call_remote_generate(text: str, language: str, speaker_wav_path: Path) -> b
         )
 
     url = config.VOICE_ENGINE_URL.rstrip("/") + "/generate"
-    headers = {"ngrok-skip-browser-warning": "true"}
+    headers = {
+        # Si el motor está detrás de un túnel gratis de ngrok, este header
+        # evita que ngrok devuelva su página de aviso interstitial en vez
+        # de pasar la petición real. No afecta a Cloud Run ni a otros hosts.
+        "ngrok-skip-browser-warning": "true",
+    }
     if config.VOICE_ENGINE_SECRET:
         headers["Authorization"] = f"Bearer {config.VOICE_ENGINE_SECRET}"
 
