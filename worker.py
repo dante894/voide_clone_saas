@@ -32,6 +32,7 @@ GENERATE_TIMEOUT_SECONDS = 600
 
 
 def enqueue_job(job_id: int) -> None:
+    print(f"[DEBUG] enqueue_job llamado con job_id={job_id}", flush=True)
     _job_queue.put(job_id)
 
 
@@ -71,6 +72,7 @@ def _call_remote_generate(text: str, language: str, speaker_wav_path: Path) -> b
 
 
 def _process_job(app, job_id: int, voices_dir: Path, output_dir: Path) -> None:
+    print(f"[DEBUG] _process_job arrancó para job_id={job_id}", flush=True)
     from models import Job, db
 
     with app.app_context():
