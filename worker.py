@@ -1,22 +1,26 @@
 """
-Cola simple de generación de audio en segundo plano.
+Generación de audio: le pide el trabajo por HTTP a un servicio externo
+(ver carpeta cloud_run/, pensado para Google Cloud Run o para correr en tu
+propia PC) que tiene la RAM necesaria para cargar XTTS-v2. Esto le permite a
+la app principal (en Render) quedarse liviana, sin cargar PyTorch ni el
+modelo en este proceso.
 
-La generación en sí NO corre acá — se le pide por HTTP a un servicio
-externo (ver carpeta cloud_run/, pensado para Google Cloud Run) que tiene
-la RAM necesaria para cargar XTTS-v2. Esto le permite a la app principal
-(en Render) quedarse liviana y funcionar en el plan Free, sin cargar
-PyTorch ni el modelo en este proceso.
-
-Se sigue usando una cola con un solo worker (no por límite de RAM local,
-sino para no mandar varias peticiones pesadas en simultáneo al servicio
-externo, que también tiene recursos limitados).
+IMPORTANTE — por qué no hay un hilo de fondo:
+Al principio esto usaba un hilo en segundo plano (threading.Thread) para
+procesar los trabajos sin bloquear las peticiones HTTP. En el plan Free de
+Render, ese hilo no llegaba a ejecutarse nunca (se creaba, pero su código
+interno jamás corría — algo específico de ese entorno que no vale la pena
+perseguir más). En cambio, ahora el trabajo se procesa de forma síncrona,
+como efecto colateral de la propia consulta de estado que el navegador ya
+hace cada 3 segundos (`GET /api/jobs/<id>`). La primera consulta después de
+generar simplemente tarda varios minutos en responder (mientras se genera
+el audio), en vez de responder rápido con "en cola". Es menos elegante,
+pero funciona de forma confiable en cualquier hosting, sin depender de que
+los hilos en segundo plano funcionen bien.
 """
 
-import queue
-import threading
 import traceback
 import uuid
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -24,17 +28,10 @@ import requests
 
 import config
 
-_job_queue: "queue.Queue[int]" = queue.Queue()
-
 # Generar un audio puede tardar varios minutos si el servicio estaba
-# "dormido" (Cloud Run con min-instances=0 tarda unos segundos en levantar
-# el contenedor) además del tiempo de inferencia.
+# "dormido" (Cloud Run con min-instances=0, o si tu PC recién arrancó el
+# motor) además del tiempo de inferencia en sí.
 GENERATE_TIMEOUT_SECONDS = 600
-
-
-def enqueue_job(job_id: int) -> None:
-    print(f"[DEBUG] enqueue_job llamado con job_id={job_id} queue_id={id(_job_queue)}", flush=True)
-    _job_queue.put(job_id)
 
 
 def _call_remote_generate(text: str, language: str, speaker_wav_path: Path) -> bytes:
@@ -72,72 +69,35 @@ def _call_remote_generate(text: str, language: str, speaker_wav_path: Path) -> b
     return resp.content
 
 
-def _process_job(app, job_id: int, voices_dir: Path, output_dir: Path) -> None:
-    print(f"[DEBUG] _process_job arrancó para job_id={job_id}", flush=True)
-    from models import Job, db
+def process_job_sync(job, voices_dir: Path, output_dir: Path) -> None:
+    """Procesa un trabajo de punta a punta, EN el mismo request que lo llama
+    (bloqueante). Se supone que ya hay un contexto de aplicación/DB activo
+    (se llama desde dentro de una vista de Flask), así que no abre uno
+    nuevo. Deja al `job` en estado 'done' o 'error' antes de retornar, y
+    guarda los cambios en la base."""
+    from models import db
 
-    with app.app_context():
-        job = Job.query.get(job_id)
-        if job is None:
-            return
-        job.status = "processing"
+    job.status = "processing"
+    db.session.commit()
+
+    try:
+        speaker_wav = voices_dir / job.voice_filename
+        if not speaker_wav.exists():
+            raise FileNotFoundError("El archivo de voz de referencia ya no existe.")
+
+        audio_bytes = _call_remote_generate(job.text, job.language, speaker_wav)
+
+        out_filename = f"{uuid.uuid4().hex}.wav"
+        out_path = output_dir / out_filename
+        out_path.write_bytes(audio_bytes)
+
+        job.status = "done"
+        job.output_filename = out_filename
+        job.output_size_bytes = out_path.stat().st_size
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        job.status = "error"
+        job.error_message = str(exc)
+    finally:
+        job.finished_at = datetime.utcnow()
         db.session.commit()
-
-        try:
-            speaker_wav = voices_dir / job.voice_filename
-            if not speaker_wav.exists():
-                raise FileNotFoundError("El archivo de voz de referencia ya no existe.")
-
-            audio_bytes = _call_remote_generate(job.text, job.language, speaker_wav)
-
-            out_filename = f"{uuid.uuid4().hex}.wav"
-            out_path = output_dir / out_filename
-            out_path.write_bytes(audio_bytes)
-
-            job.status = "done"
-            job.output_filename = out_filename
-            job.output_size_bytes = out_path.stat().st_size
-        except Exception as exc:  # noqa: BLE001
-            traceback.print_exc()
-            job.status = "error"
-            job.error_message = str(exc)
-        finally:
-            job.finished_at = datetime.utcnow()
-            db.session.commit()
-
-
-def start_worker(app, voices_dir: Path, output_dir: Path) -> None:
-    """Arranca el hilo que va tomando trabajos de la cola, uno por vez."""
-    print(f"[DEBUG] start_worker() llamado, queue_id={id(_job_queue)} pid={os.getpid()}", flush=True)
-
-    def _loop():
-        print(f"[DEBUG] _loop() arrancó dentro del hilo, queue_id={id(_job_queue)} pid={os.getpid()}", flush=True)
-        while True:
-            job_id = _job_queue.get()
-            print(f"[DEBUG] _loop sacó job_id={job_id} de la cola", flush=True)
-            try:
-                _process_job(app, job_id, voices_dir, output_dir)
-            except Exception:  # noqa: BLE001
-                traceback.print_exc()
-            finally:
-                _job_queue.task_done()
-
-    thread = threading.Thread(target=_loop, daemon=True)
-    thread.start()
-    print(f"[DEBUG] thread.start() ejecutado, thread.is_alive()={thread.is_alive()}", flush=True)
-
-
-def requeue_pending_jobs(app) -> None:
-    """Al arrancar la app, vuelve a encolar trabajos que quedaron a medias
-    (por ejemplo si el servicio se reinició en Render)."""
-    from models import Job
-
-    with app.app_context():
-        pending = Job.query.filter(Job.status.in_(["pending", "processing"])).all()
-        for job in pending:
-            job.status = "pending"
-        from models import db
-
-        db.session.commit()
-        for job in pending:
-            enqueue_job(job.id)

@@ -73,9 +73,6 @@ def create_app() -> Flask:
     with app.app_context():
         db.create_all()
 
-    worker.start_worker(app, VOICES_DIR, OUTPUT_DIR)
-    worker.requeue_pending_jobs(app)
-
     register_pageview_tracking(app)
     register_routes(app)
     return app
@@ -179,7 +176,10 @@ def register_routes(app: Flask) -> None:
         db.session.commit()
         return jsonify({"ok": True, "filename": filename, "id": voice.id})
 
-    # ---------- Generación (en segundo plano) ----------
+    # ---------- Generación ----------
+    # Nota: no hay cola en segundo plano. El trabajo se crea acá (rápido) y
+    # se procesa de forma síncrona la primera vez que se consulta su estado
+    # (ver api_job_status más abajo) — ver worker.py para la explicación.
 
     @app.route("/api/generate", methods=["POST"])
     @login_required
@@ -222,7 +222,6 @@ def register_routes(app: Flask) -> None:
         )
         db.session.add(job)
         db.session.commit()
-        worker.enqueue_job(job.id)
 
         return jsonify({"ok": True, "job_id": job.id})
 
@@ -232,6 +231,13 @@ def register_routes(app: Flask) -> None:
         job = Job.query.filter_by(id=job_id, user_id=current_user.id).first()
         if not job:
             return jsonify({"error": "Trabajo no encontrado"}), 404
+
+        # Si todavía no se procesó, lo hacemos ahora mismo, en esta misma
+        # petición (bloqueante). El frontend ya está preparado para esperar
+        # varios minutos la respuesta de este endpoint mientras sondea.
+        if job.status == "pending":
+            worker.process_job_sync(job, VOICES_DIR, OUTPUT_DIR)
+
         return jsonify({
             "status": job.status,
             "file": job.output_filename,
