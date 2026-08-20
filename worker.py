@@ -16,6 +16,7 @@ import queue
 import threading
 import traceback
 import uuid
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -32,7 +33,7 @@ GENERATE_TIMEOUT_SECONDS = 600
 
 
 def enqueue_job(job_id: int) -> None:
-    print(f"[DEBUG] enqueue_job llamado con job_id={job_id}", flush=True)
+    print(f"[DEBUG] enqueue_job llamado con job_id={job_id} queue_id={id(_job_queue)}", flush=True)
     _job_queue.put(job_id)
 
 
@@ -107,10 +108,13 @@ def _process_job(app, job_id: int, voices_dir: Path, output_dir: Path) -> None:
 
 def start_worker(app, voices_dir: Path, output_dir: Path) -> None:
     """Arranca el hilo que va tomando trabajos de la cola, uno por vez."""
+    print(f"[DEBUG] start_worker() llamado, queue_id={id(_job_queue)} pid={os.getpid()}", flush=True)
 
     def _loop():
+        print(f"[DEBUG] _loop() arrancó dentro del hilo, queue_id={id(_job_queue)} pid={os.getpid()}", flush=True)
         while True:
             job_id = _job_queue.get()
+            print(f"[DEBUG] _loop sacó job_id={job_id} de la cola", flush=True)
             try:
                 _process_job(app, job_id, voices_dir, output_dir)
             except Exception:  # noqa: BLE001
@@ -120,6 +124,7 @@ def start_worker(app, voices_dir: Path, output_dir: Path) -> None:
 
     thread = threading.Thread(target=_loop, daemon=True)
     thread.start()
+    print(f"[DEBUG] thread.start() ejecutado, thread.is_alive()={thread.is_alive()}", flush=True)
 
 
 def requeue_pending_jobs(app) -> None:
