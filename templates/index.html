@@ -97,6 +97,10 @@
       <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
     </div>
     <div class="meter-label" id="meterLabel"></div>
+    <button class="btn secondary" id="deleteVoiceOnErrorBtn" type="button"
+            style="display:none; margin-top:8px; background: var(--danger);">
+      Borrar esta voz dañada
+    </button>
   </section>
 
   <!-- PASO 3: RESULTADO -->
@@ -123,6 +127,7 @@
 
 <script>
 let selectedVoice = null;
+let selectedVoiceId = null;
 let mediaRecorder = null;
 let recordedChunks = [];
 let recordedWavBlob = null;
@@ -151,6 +156,8 @@ async function loadVoices() {
   if (!selectedVoice) {
     selectedVoice = voices[0].filename;
   }
+  const current = voices.find(v => v.filename === selectedVoice);
+  selectedVoiceId = current ? current.id : null;
 
   voices.forEach((v) => {
     const card = document.createElement("div");
@@ -381,6 +388,33 @@ function writeStr(view, offset, str) {
   }
 }
 
+// ---------- Borrar voz dañada directo desde el error ----------
+
+function maybeShowDeleteVoiceButton(errorText) {
+  const deleteBtn = document.getElementById("deleteVoiceOnErrorBtn");
+  const isMissingFileError = (errorText || "").includes("ya no existe");
+  deleteBtn.style.display = isMissingFileError && selectedVoiceId ? "inline-block" : "none";
+}
+
+document.getElementById("deleteVoiceOnErrorBtn").addEventListener("click", async () => {
+  if (!selectedVoiceId) return;
+  if (!confirm("¿Borrar esta voz? Vas a tener que subirla de nuevo para volver a usarla.")) return;
+
+  const deleteBtn = document.getElementById("deleteVoiceOnErrorBtn");
+  deleteBtn.disabled = true;
+  try {
+    await fetch(`/api/voices/${selectedVoiceId}`, { method: "DELETE" });
+    deleteBtn.style.display = "none";
+    document.getElementById("meterLabel").textContent =
+      "Voz borrada. Subí una nueva voz de referencia para seguir generando.";
+    await loadVoices();
+  } catch (err) {
+    document.getElementById("meterLabel").textContent = "No se pudo borrar la voz: " + err.message;
+  } finally {
+    deleteBtn.disabled = false;
+  }
+});
+
 // ---------- Contador de caracteres ----------
 
 const MAX_CHARS = {{ limits.max_chars }};
@@ -395,12 +429,20 @@ function updateCharCounter() {
 textInput.addEventListener("input", updateCharCounter);
 updateCharCounter();
 
-// ---------- Generación (en segundo plano, con sondeo del estado) ----------
+// ---------- Generación (síncrona la primera vez que se consulta el estado) ----------
 
 async function pollJob(jobId, meterLabel) {
   const started = Date.now();
+  let attempt = 0;
   while (true) {
-    await new Promise((r) => setTimeout(r, 3000));
+    attempt += 1;
+    const secs = Math.floor((Date.now() - started) / 1000);
+    // Esta petición puede tardar varios minutos en responder (la primera
+    // vez procesa el audio de punta a punta antes de contestar).
+    meterLabel.textContent = attempt === 1
+      ? `Generando audio... (puede tardar varios minutos, no cierres esta página)`
+      : `Generando audio... (${secs}s)`;
+
     const res = await fetch(`/api/jobs/${jobId}`);
     const data = await res.json();
 
@@ -410,10 +452,8 @@ async function pollJob(jobId, meterLabel) {
     if (data.status === "error") {
       return { ok: false, error: data.error || "Ocurrió un error generando el audio." };
     }
-    const secs = Math.floor((Date.now() - started) / 1000);
-    meterLabel.textContent = data.status === "processing"
-      ? `Generando audio... (${secs}s, puede tardar varios minutos)`
-      : `En cola... (${secs}s)`;
+    // Por si acaso queda en un estado intermedio, reintentamos cada 3s.
+    await new Promise((r) => setTimeout(r, 3000));
   }
 }
 
@@ -439,7 +479,8 @@ document.getElementById("generateBtn").addEventListener("click", async () => {
 
   btn.disabled = true;
   meter.classList.add("active");
-  meterLabel.textContent = "Encolando...";
+  meterLabel.textContent = "Iniciando...";
+  document.getElementById("deleteVoiceOnErrorBtn").style.display = "none";
 
   try {
     const res = await fetch("/api/generate", {
@@ -470,6 +511,7 @@ document.getElementById("generateBtn").addEventListener("click", async () => {
       meterLabel.textContent = "Listo.";
     } else {
       meterLabel.textContent = result.error;
+      maybeShowDeleteVoiceButton(result.error);
     }
   } catch (err) {
     meterLabel.textContent = "Error de conexión: " + err.message;

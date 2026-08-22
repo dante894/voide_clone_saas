@@ -15,10 +15,12 @@ es multiusuario, pensada para desplegarse en Render con:
 > su permiso (o tu propia voz). Generar audio con la voz de alguien sin su
 > consentimiento puede ser ilegal y, en cualquier caso, es una mala idea.
 
-La generación de audio (XTTS-v2) corre en un **servicio aparte en Google
-Cloud Run** (gratis dentro de la cuota mensual), no en Render — así la app
-web puede vivir en el plan Free de Render sin problemas de memoria. Ver
-`DEPLOY.md`, sección 3, para configurarlo.
+La generación de audio (XTTS-v2) corre **aparte** de esta app — no en
+Render, porque necesita más RAM de la que da el plan Free. El código de ese
+motor está en `cloud_run/` y podés correrlo donde quieras: en tu propia PC
+con un túnel gratis (para arrancar, sin gastar nada) o en Google Cloud Run
+(cuando quieras algo siempre disponible). Ver `DEPLOY.md`, secciones 3 y 4,
+para configurar cualquiera de las dos.
 
 Para desplegarlo en Render con cobros por Mercado Pago, seguí **`DEPLOY.md`**
 — tiene la guía completa paso a paso.
@@ -33,11 +35,11 @@ config.py            # Variables de entorno y límites de cada plan
 models.py            # Modelos de base de datos (User, Voice, Job)
 auth.py              # Registro / login / logout / login con Google
 billing.py           # Integración con Mercado Pago (suscripciones + webhook)
-worker.py            # Cola de generación: le pide el audio al servicio de Cloud Run
+worker.py            # Cola de generación: le pide el audio al motor externo
 admin.py              # Panel de administración (/admin)
 templates/           # HTML (index, login, registro, planes, cuenta, admin)
 static/style.css      # Estilos compartidos
-cloud_run/              # Código para el servicio de Cloud Run (motor XTTS-v2)
+cloud_run/              # Motor de generación (XTTS-v2) — corré esto en tu PC o en Cloud Run
   app.py                # Servidor FastAPI con el endpoint /generate
   Dockerfile
   requirements.txt

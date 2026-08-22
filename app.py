@@ -127,7 +127,7 @@ def register_routes(app: Flask) -> None:
     @login_required
     def api_list_voices():
         voices = Voice.query.filter_by(user_id=current_user.id).order_by(Voice.created_at).all()
-        return jsonify([{"filename": v.filename, "name": v.display_name} for v in voices])
+        return jsonify([{"id": v.id, "filename": v.filename, "name": v.display_name} for v in voices])
 
     @app.route("/api/voices/<int:voice_id>", methods=["DELETE"])
     @login_required

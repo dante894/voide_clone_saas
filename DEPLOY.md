@@ -58,7 +58,64 @@ Guardá ese valor, lo vas a necesitar en el paso 4.
 
 ---
 
-## 3. Motor de generación de audio en Google Cloud Run (recomendado, gratis)
+## 3. Motor de generación de audio — corriendo en tu propia PC (para empezar, $0 y sin tarjeta)
+
+Mientras no factures todavía, la forma más simple de tener el motor de
+generación funcionando sin pagar nada ni cargar tarjeta en ningún lado es
+correrlo en tu propia computadora y exponerlo a internet con un túnel
+gratuito. El código es el mismo que se usaría en un servidor en la nube
+(carpeta `cloud_run/`), pero corriendo local.
+
+1. Necesitás Python 3.10, 3.11 o 3.12. Abrí una terminal en la carpeta
+   `cloud_run/` de este proyecto:
+   ```bash
+   python -m venv venv
+   # Windows: venv\Scripts\activate   |   Mac/Linux: source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+   Tarda varios minutos la primera vez (instala PyTorch).
+2. Elegí una clave secreta random (por ejemplo con
+   `python3 -c "import secrets; print(secrets.token_hex(24))"`) y arrancá
+   el servidor:
+   ```bash
+   # Windows (PowerShell):
+   $env:VOICE_ENGINE_SECRET="tu-clave-random"
+   # Mac/Linux:
+   export VOICE_ENGINE_SECRET="tu-clave-random"
+
+   uvicorn app:app --host 0.0.0.0 --port 8000
+   ```
+   Dejá esta terminal abierta y corriendo — si la cerrás, el motor deja de
+   responder.
+3. En **otra** terminal (sin cerrar la anterior), instalá
+   [cloudflared](https://github.com/cloudflare/cloudflared/releases) (no
+   hace falta cuenta ni tarjeta) y corré:
+   ```bash
+   cloudflared tunnel --url http://localhost:8000
+   ```
+   Te va a imprimir una URL pública random, algo como
+   `https://random-words-1234.trycloudflare.com`.
+4. Probá que ande: abrí `<esa-URL>/health` en el navegador — debería
+   responder `{"status":"ok","model_loaded":false}`.
+5. En Render, agregá estas variables de entorno al servicio web:
+   ```
+   VOICE_ENGINE_URL=https://random-words-1234.trycloudflare.com
+   VOICE_ENGINE_SECRET=<la misma clave del paso 2>
+   ```
+
+**Limitaciones a tener en cuenta** (por eso esto es para arrancar, no para
+el lanzamiento definitivo):
+- Si tu PC se apaga, se duerme, o cerrás las terminales, la generación de
+  audio deja de funcionar para todos los usuarios de la app.
+- La URL de `trycloudflare.com` es temporal: **cambia cada vez que
+  reiniciás** `cloudflared`. Si eso pasa, hay que volver a actualizar
+  `VOICE_ENGINE_URL` en Render con la URL nueva.
+- Cuando empieces a facturar (o si esto te empieza a resultar molesto),
+  migrá al mismo código pero corriendo en **Google Cloud Run** — ver la
+  sección siguiente. No hay que tocar nada del código, solo cambiar dónde
+  corre.
+
+## 4. Motor de generación de audio en Google Cloud Run (para cuando factures)
 
 XTTS-v2 necesita varios GB de RAM para cargarse — más de lo que da el plan
 Free de Render. En vez de pagar un plan más caro, se puede correr el modelo
@@ -124,18 +181,19 @@ el trabajo va a decir "en cola" un poco más esa primera vez.
 corré de nuevo el mismo comando `gcloud run deploy ...` del paso 4 — no
 hace falta repetir los pasos anteriores.
 
-## 4. Crear el servicio en Render (Blueprint)
+## 5. Crear el servicio en Render (Blueprint)
 
 1. En el dashboard de Render: **New → Blueprint**.
 2. Conectá el repositorio. Render va a detectar `render.yaml` y proponer:
    - Un **Web Service** (`estudio-de-voz`) en plan **Free** — alcanza de
-     sobra porque el modelo XTTS-v2 ya NO corre acá (corre en el servicio
-     de Cloud Run del paso anterior).
+     sobra porque el modelo XTTS-v2 ya NO corre acá (corre en tu PC o en
+     Cloud Run, según lo que hayas armado en los pasos 3-4).
    - Una base de datos **Postgres** (`estudio-de-voz-db`).
 3. Cuando te pida las variables marcadas `sync: false`, cargá:
    - `MP_ACCESS_TOKEN`, `MP_PUBLIC_KEY`, `MP_PLAN_ID` (el que obtuviste en
      el paso 2)
-   - `VOICE_ENGINE_URL` y `VOICE_ENGINE_SECRET` (los del paso 3)
+   - `VOICE_ENGINE_URL` y `VOICE_ENGINE_SECRET` (los que armaste en el
+     paso 3 o el paso 4)
 4. Confirmá la creación. El primer deploy debería ser rápido — ya no
    instala PyTorch acá.
 
@@ -162,7 +220,7 @@ Creá un Web Service normal apuntando a este repo, con:
 
 ---
 
-## 5. Actualizar `APP_BASE_URL` con la URL real
+## 6. Actualizar `APP_BASE_URL` con la URL real
 
 Una vez que Render te asigna la URL definitiva (por ejemplo
 `https://estudio-de-voz.onrender.com`), actualizá la variable de entorno
@@ -171,7 +229,7 @@ armar el link de retorno de Mercado Pago).
 
 ---
 
-## 6. Configurar el webhook de Mercado Pago
+## 7. Configurar el webhook de Mercado Pago
 
 En el [panel de Mercado Pago](https://www.mercadopago.com/developers/panel) →
 tu aplicación → **Webhooks**, agregá esta URL:
@@ -187,7 +245,7 @@ usuario vuelva a tu sitio.
 
 ---
 
-## 7. Probar el flujo completo
+## 8. Probar el flujo completo
 
 1. Entrá a tu app → `/registro` → creá una cuenta.
 2. Andá a `/planes` → "Pasarme a Pro con Mercado Pago" → te redirige al
@@ -202,7 +260,7 @@ usuario vuelva a tu sitio.
 
 ---
 
-## 8. Login con Google (opcional)
+## 9. Login con Google (opcional)
 
 1. En la [consola de Google Cloud](https://console.cloud.google.com/apis/credentials),
    creá credenciales tipo **"ID de cliente de OAuth"** → Aplicación web.
@@ -219,7 +277,7 @@ Si un email ya tenía cuenta creada con contraseña y esa persona después
 entra con Google usando el mismo email, la app une ambas cuentas (no crea
 una duplicada).
 
-## 9. Panel de administración
+## 10. Panel de administración
 
 1. Definí la variable de entorno `ADMIN_EMAILS` en Render con tu email (o
    varios, separados por coma): `ADMIN_EMAILS=vos@tuemail.com`.
@@ -239,7 +297,7 @@ una duplicada).
 > perder los datos existentes. Las tablas nuevas (`login_events`,
 > `page_views`) las crea solo `db.create_all()` al arrancar la app.
 
-## 10. Costos a tener en cuenta
+## 11. Costos a tener en cuenta
 
 - Con este esquema (Render Free + Google Cloud Run), **la app no tiene
   costo fijo mensual** mientras el uso se mantenga dentro de la cuota
@@ -258,7 +316,7 @@ una duplicada).
 
 ---
 
-## 11. Recordatorio de uso responsable
+## 12. Recordatorio de uso responsable
 
 El README original ya lo advertía y sigue aplicando: usá esto solo con voces
 de personas que dieron su consentimiento, o con tu propia voz. Como ahora es
